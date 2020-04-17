@@ -72,7 +72,7 @@ transformed_dataset=Coco(partition='train',
                                            ]))
 
 
-writer = SummaryWriter('../results/bclogit_sum')
+writer = SummaryWriter('../results/new_bce')
 dataset_len=(len(transformed_dataset))
 print('Length of dataset is '+ str(dataset_len)+'\n')
 batch_size=8
@@ -81,15 +81,15 @@ dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
                         shuffle=True,collate_fn=helper.my_collate, num_workers=2)
 
 
-optimizer = optim.SGD(model.parameters(), lr=0.000001, weight_decay=0.0005, momentum=0.9)
+optimizer = optim.SGD(model.parameters(), lr=0.0001, weight_decay=0.0005, momentum=0.9)
 epochs=50
 total_loss=0
 write=0
 misses=0
 break_flag=0
 avg_iou=0
-e=54
-while e<125:
+e=0
+while e<50:
     model.train()
     e=e+1
     prg_counter=0
@@ -140,7 +140,7 @@ while e<125:
             targets[:,:,0:4]=targets[:,:,0:4]*inp_dim
             targets=targets.squeeze(0)
             targets[:,0:4]=util.transform_groundtruth(targets,anchors,offset,strd)
-            loss=util.yolo_loss(raw_pred,targets,noobj_box,batch_size)
+            loss=util.yolo_loss(raw_pred,targets,noobj_box,mask)
             loss.backward()
             optimizer.step()
             
@@ -166,7 +166,7 @@ while e<125:
             print(strd.shape[0])
             prg_counter=prg_counter+1
             
-    mAP=tester.get_map(model,confidence=0.5,iou_threshold=0)
+    mAP=tester.get_map(model,confidence=0.1,iou_threshold=0.3)
     torch.save(model.state_dict(), PATH)
     writer.add_scalar('Loss/train', total_loss/train_counter, e)
     writer.add_scalar('AIoU/train', avg_iou/train_counter, e)

@@ -22,16 +22,14 @@ class Coco(Dataset):
                 on a sample.
         """
 
-        self.pointers=pd.read_csv('pointers/'+partition+'2017.txt',names=['img'])
-        self.pointers['box']=self.pointers['img'].apply(lambda x: 'coco/labels/'+x.split('.')[0]+'.txt')
+        self.pointers=pd.read_csv('../pointers/'+partition+'2017.txt',names=['img'])
+        self.pointers['box']=self.pointers['img'].apply(lambda x: x.split('.')[0]+'.txt')
         
         
-        self.my_image_zip = ZipFile(os.path.join('images',partition+'2017.zip'), 'r')
-        self.img_handle = None
+        self.my_image_path = os.path.join('../images',partition+'2017')
         
         
-        self.my_label_zip=ZipFile(os.path.join('labels','coco2017labels.zip'), 'r')
-        self.label_handle = None
+        self.my_label_path=os.path.join('../labels/coco/labels',partition+'2017')
         
         self.transform = transform
         
@@ -40,22 +38,19 @@ class Coco(Dataset):
         return self.pointers.shape[0]
 
     def __getitem__(self, idx):
-
-        if self.label_handle is None:
-            try:
-                with self.my_label_zip.open(self.pointers.iloc[idx, 1]) as box:
-                    box=box.read().decode("utf-8")
-                    box=pd.DataFrame([x.split() for x in box.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
-            except KeyError:
-                return None
+        img_path=os.path.join(self.my_image_path,self.pointers.iloc[idx, 0])
+        label_path=os.path.join(self.my_label_path,self.pointers.iloc[idx, 1])
+        try:
+            with open(label_path) as box:
+                box=box.read()
+                box=pd.DataFrame([x.split() for x in box.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
+        except FileNotFoundError:
+            return None
         
-        if self.img_handle is None:
-            try:
-                with self.my_image_zip.open(self.pointers.iloc[idx, 0]) as buffer:
-                    buffer=buffer.read()
-                    img = cv2.imdecode(np.frombuffer(buffer, np.uint8),1)
-            except KeyError:
-                print(self.pointers.iloc[idx, 0])
+        try:
+            img = cv2.imread(img_path,1)
+        except FileNotFoundError:
+            print(self.pointers.iloc[idx, 0])
         
         b= box.values.astype(np.float32)
         b=torch.tensor(b)
@@ -66,8 +61,10 @@ class Coco(Dataset):
         
         if self.transform:
             img = self.transform(img)
+            
         return {'images': img,
-                'boxes': boxes}
+                'boxes': boxes,
+               'img_name': self.pointers.iloc[idx, 1]}
     
 class ResizeToTensor(object):
     """Convert ndarrays in sample to Tensors."""

@@ -55,6 +55,7 @@ def my_collate(batch):
     write=0
     boxes=[]
     img_name=[]
+    pictures=[]
     for el in filter(None,batch):
         if write==0:
             pictures=el['images'].unsqueeze(-4)

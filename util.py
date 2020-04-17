@@ -50,7 +50,11 @@ def predict(prediction, inp_dim, anchors, num_classes, CUDA = True):
     
     #Sigmoid object confidencce
     prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
-    prediction[:,:,5: 5 + num_classes] = torch.sigmoid((prediction[:,:, 5 : 5 + num_classes]))
+    
+    prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes].clone()),dim=2)
+    
+    
+#     prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes]),dim=2)
     
     
     return prediction
@@ -278,12 +282,14 @@ def yolo_loss(pred,gt,noobj_box,batch_size):
     total_loss=0
     no_obj_conf_loss=0
     no_obj_counter=0
-    gamma=0
+    gamma=1
     alpha=0.5
 
 #     pred[:,0] = torch.sigmoid(pred[:,0])
 #     pred[:,1]= torch.sigmoid(pred[:,1])
 #     xy_loss=nn.MSELoss(reduction='sum')
+    
+# #     mse=nn.MSELoss(reduction='sum')
     xy_loss=nn.BCEWithLogitsLoss(reduction='sum')
 
     wh_loss=nn.MSELoss(reduction='sum')
@@ -310,16 +316,17 @@ def yolo_loss(pred,gt,noobj_box,batch_size):
 #     pos_loss=-torch.log(classes[~neg].mean())
     
         #the confidense penalty could be either 1 or the actual IoU
-#     confidence_loss =confidence_loss -alpha*((1-pred[:,4].mean())**gamma)*torch.log(pred[:,4].mean())
+#     confidence_loss =confidence_loss -alpha*((1-pred[:,4])**gamma)*torch.log(pred[:,4])
 
-#     no_obj_conf_loss =no_obj_conf_loss -(1-alpha)*(noobj_box.mean()**gamma)*torch.log(1-noobj_box.mean())
+#     no_obj_conf_loss =no_obj_conf_loss -(1-alpha)*((noobj_box)**gamma)*torch.log(1-noobj_box)
 
 #     confidence_loss =confidence_loss +(1-pred[:,4])**2
 
 #     no_obj_conf_loss =no_obj_conf_loss +(noobj_box)**2
     
-    total_loss=5*xy_loss(pred[:,:2],gt[:,0:2])+5*wh_loss(pred[:,2:4],gt[:,2:4])+confidence_loss+0.5*no_obj_conf_loss+class_loss
-#     xy_loss=helper.kl_div(gt[:,:2],pred[:,:2]).sum()
+    total_loss=5*(xy_loss(pred[:,:2],gt[:,0:2]))+5*wh_loss(pred[:,2:4],gt[:,2:4])+confidence_loss+0.5*no_obj_conf_loss+class_loss
+    total_loss=total_loss/sum(batch_size)
+#     xy_loss=helper.kl_div(gt[:,:2],pred[:,:2]).mean()
 
 #     total_loss=5*xy_loss+5*wh_loss(pred[:,2:4],gt[:,2:4])+confidence_loss+0.5*no_obj_conf_loss+class_loss
     

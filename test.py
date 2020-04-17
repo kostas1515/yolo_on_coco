@@ -85,4 +85,4 @@ def get_map(model,confidence,iou_threshold):
 #         print('%s: %f' % (c, average_precision))
 
 #     print('map is:',mAP/80)
-    return mAP
+    return mAP/80
