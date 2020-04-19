@@ -88,8 +88,8 @@ write=0
 misses=0
 break_flag=0
 avg_iou=0
-e=0
-while e<50:
+e=27
+while e<75:
     model.train()
     e=e+1
     prg_counter=0
@@ -166,7 +166,7 @@ while e<50:
             print(strd.shape[0])
             prg_counter=prg_counter+1
             
-    mAP=tester.get_map(model,confidence=0.1,iou_threshold=0.3)
+    mAP=tester.get_map(model,confidence=0.6,iou_threshold=0.3)
     torch.save(model.state_dict(), PATH)
     writer.add_scalar('Loss/train', total_loss/train_counter, e)
     writer.add_scalar('AIoU/train', avg_iou/train_counter, e)

@@ -81,6 +81,19 @@ def kl_div(pred,gt):
     kl=1/2*(mu*(1/pred.std(dim=0)**2+1/gt.std(dim=0)**2)+sigma+1/sigma-2)
     
     return kl
+
+def get_idf(gt,mask):
+    corpus_length=sum(mask)
+    tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
+    idf=torch.log(corpus_length/gt[:,5:].sum(axis=0))
+    idf[idf== float('inf')] = 0
+    classes=gt[:,5:].max(1)[1]
+    
+    
+    return tf*idf[classes],idf
+    
+
+    
     
 
 def write_pred(imgname,pred_final,inp_dim):

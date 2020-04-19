@@ -6,6 +6,8 @@ from torch.autograd import Variable
 import numpy as np
 import cv2
 import helper as helper
+import custom_loss as csloss
+# from gluoncv import loss as gloss
    
 def transform(prediction,anchors,x_y_offset,stride,CUDA = True):
     '''
@@ -51,7 +53,7 @@ def predict(prediction, inp_dim, anchors, num_classes, CUDA = True):
     #Sigmoid object confidencce
     prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
     
-    prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes].clone()),dim=2)
+    prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
     
     
 #     prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes]),dim=2)
@@ -262,7 +264,7 @@ def transform_groundtruth(target,anchors,cx_cy,strd):
     
     return target[:,0:4]
 
-def yolo_loss(pred,gt,noobj_box,batch_size):
+def yolo_loss(pred,gt,noobj_box,mask):
     '''
     the targets correspon to single image,
     multiple targets can appear in the same image
@@ -284,23 +286,28 @@ def yolo_loss(pred,gt,noobj_box,batch_size):
     no_obj_counter=0
     gamma=1
     alpha=0.5
-
+    weights,w_cls=helper.get_idf(gt,mask)
+    weights=weights.unsqueeze(1)
 #     pred[:,0] = torch.sigmoid(pred[:,0])
 #     pred[:,1]= torch.sigmoid(pred[:,1])
 #     xy_loss=nn.MSELoss(reduction='sum')
     
 # #     mse=nn.MSELoss(reduction='sum')
-    xy_loss=nn.BCEWithLogitsLoss(reduction='sum')
-
-    wh_loss=nn.MSELoss(reduction='sum')
     
+    
+    xy_loss=nn.BCEWithLogitsLoss(reduction='none')
+    xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
+    
+    wh_loss=nn.MSELoss(reduction='none')
+    wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
 #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
     
-    bce_class=nn.BCELoss(reduction='sum')
-    class_loss=bce_class(pred[:,5:],gt[:,5:])
+    bce_class=nn.BCELoss(weight=w_cls,reduction='none')
+#     focal_loss=csloss.FocalLoss(weight=None,reduction='none',alpha=0.5)
+    class_loss=(bce_class(pred[:,5:],gt[:,5:])).sum()
     
-    bce_obj=nn.BCELoss(reduction='sum')
-    confidence_loss=bce_obj(pred[:,4],gt[:,4])
+    bce_obj=nn.BCELoss(reduction='none')
+    confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
     
     
     bce_noobj=nn.BCELoss(reduction='sum')
@@ -323,12 +330,11 @@ def yolo_loss(pred,gt,noobj_box,batch_size):
 #     confidence_loss =confidence_loss +(1-pred[:,4])**2
 
 #     no_obj_conf_loss =no_obj_conf_loss +(noobj_box)**2
-    
-    total_loss=5*(xy_loss(pred[:,:2],gt[:,0:2]))+5*wh_loss(pred[:,2:4],gt[:,2:4])+confidence_loss+0.5*no_obj_conf_loss+class_loss
-    total_loss=total_loss/sum(batch_size)
+
 #     xy_loss=helper.kl_div(gt[:,:2],pred[:,:2]).mean()
 
-#     total_loss=5*xy_loss+5*wh_loss(pred[:,2:4],gt[:,2:4])+confidence_loss+0.5*no_obj_conf_loss+class_loss
+    total_loss=5*xy_coord_loss+5*wh_coord_loss+confidence_loss+no_obj_conf_loss+class_loss
+    total_loss=total_loss/sum(mask)
     
     return total_loss
 
