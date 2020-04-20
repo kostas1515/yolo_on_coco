@@ -32,7 +32,7 @@ when loading weights from dataparallel model then, you first need to instatiate 
 if you start fresh then first model.load_weights and then make it parallel
 '''
 try:
-    PATH = '../bcelogit.pth'
+    PATH = '../pretrained.pth'
     weights = torch.load(PATH)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -72,7 +72,7 @@ transformed_dataset=Coco(partition='train',
                                            ]))
 
 
-writer = SummaryWriter('../results/new_bce')
+writer = SummaryWriter('../results/pretrained')
 dataset_len=(len(transformed_dataset))
 print('Length of dataset is '+ str(dataset_len)+'\n')
 batch_size=8
@@ -82,14 +82,19 @@ dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
 
 
 optimizer = optim.SGD(model.parameters(), lr=0.0001, weight_decay=0.0005, momentum=0.9)
+lambda1 = lambda epoch: 0.97**epoch
+scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
+
+
 epochs=50
 total_loss=0
 write=0
 misses=0
 break_flag=0
 avg_iou=0
-e=27
-while e<75:
+e=0
+mAP_max=0
+while e<100:
     model.train()
     e=e+1
     prg_counter=0
@@ -166,8 +171,7 @@ while e<75:
             print(strd.shape[0])
             prg_counter=prg_counter+1
             
-    mAP=tester.get_map(model,confidence=0.6,iou_threshold=0.3)
-    torch.save(model.state_dict(), PATH)
+    mAP=tester.get_map(model,confidence=0.1,iou_threshold=0.3)
     writer.add_scalar('Loss/train', total_loss/train_counter, e)
     writer.add_scalar('AIoU/train', avg_iou/train_counter, e)
     writer.add_scalar('PConf/train', avg_conf/train_counter, e)
@@ -176,6 +180,12 @@ while e<75:
     writer.add_scalar('NClass/train', avg_neg/train_counter, e)
     writer.add_scalar('mAP/valid', mAP, e)
     
+    if mAP>mAP_max:
+        torch.save(model.state_dict(), PATH)
+        mAP_max=mAP
+    scheduler.step()
     print('\ntotal number of misses is ' + str(misses))
     print('\n total average loss is '+str(total_loss/train_counter))
     print('\n total average iou is '+str(avg_iou/train_counter))
+    
+torch.save(model.state_dict(), PATH)

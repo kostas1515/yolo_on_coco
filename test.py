@@ -47,7 +47,7 @@ def get_map(model,confidence,iou_threshold):
 
         raw_pred=raw_pred.to(device='cuda')
         true_pred=util.transform(raw_pred.clone(),pw_ph,cx_cy,stride)
-
+        
         sorted_pred=torch.sort(true_pred[:,:,4],descending=True)
         pred_mask=sorted_pred[0]>confidence
         indices=[(sorted_pred[1][e,:][pred_mask[e,:]]) for e in range(pred_mask.shape[0])]

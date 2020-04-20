@@ -89,8 +89,17 @@ def get_idf(gt,mask):
     idf[idf== float('inf')] = 0
     classes=gt[:,5:].max(1)[1]
     
+    tfidf=tf*idf[classes]
+    tfidf=torch.softmax(tfidf,dim=0)
     
-    return tf*idf[classes],idf
+    return tfidf,idf
+
+def get_area_weights(gt):
+    wh=torch.exp(gt[:,2:4])
+    area=wh[:,0]*wh[:,1]
+    weights=torch.sigmoid(1/area).cuda()
+    
+    return weights
     
 
     

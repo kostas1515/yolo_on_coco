@@ -53,10 +53,10 @@ def predict(prediction, inp_dim, anchors, num_classes, CUDA = True):
     #Sigmoid object confidencce
     prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
     
-    prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
+#     prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
     
     
-#     prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes]),dim=2)
+    prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes]).clone(),dim=2)
     
     
     return prediction
@@ -287,24 +287,23 @@ def yolo_loss(pred,gt,noobj_box,mask):
     gamma=1
     alpha=0.5
     weights,w_cls=helper.get_idf(gt,mask)
-    weights=weights.unsqueeze(1)
-#     pred[:,0] = torch.sigmoid(pred[:,0])
-#     pred[:,1]= torch.sigmoid(pred[:,1])
-#     xy_loss=nn.MSELoss(reduction='sum')
+    area_weights=helper.get_area_weights(gt)
+    weights=(weights).unsqueeze(1)
     
-# #     mse=nn.MSELoss(reduction='sum')
+    pred[:,0] = torch.sigmoid(pred[:,0])
+    pred[:,1]= torch.sigmoid(pred[:,1])
+    xy_loss=nn.MSELoss(reduction='none')
     
-    
-    xy_loss=nn.BCEWithLogitsLoss(reduction='none')
+#     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
     xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
     
     wh_loss=nn.MSELoss(reduction='none')
     wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
 #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
     
-    bce_class=nn.BCELoss(weight=w_cls,reduction='none')
-#     focal_loss=csloss.FocalLoss(weight=None,reduction='none',alpha=0.5)
-    class_loss=(bce_class(pred[:,5:],gt[:,5:])).sum()
+    bce_class=nn.BCELoss(reduction='none')
+#     focal_loss=csloss.FocalLoss(reduction='none',alpha=0.5)
+    class_loss=(weights*bce_class(pred[:,5:],gt[:,5:])).sum()
     
     bce_obj=nn.BCELoss(reduction='none')
     confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
