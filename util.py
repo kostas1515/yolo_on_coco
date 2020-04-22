@@ -102,34 +102,81 @@ def get_utillities(stride,inp_dim, anchors, num_classes):
 
 
 
-def bbox_iou(box1, box2,CUDA=True):
-    """
-    Returns the IoU of two bounding boxes 
+# def bbox_iou(box1, box2,CUDA=True):
+#     """
+#     Returns the IoU of two bounding boxes 
     
     
-    """
-    #Get the coordinates of bounding boxes
+#     """
+#     #Get the coordinates of bounding boxes
+#     b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,:,0], box1[:,:,1], box1[:,:,2], box1[:,:,3]
+#     b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,:,0], box2[:,:,1], box2[:,:,2], box2[:,:,3]
+    
+#     #get the coordinates of the intersection rectangle
+#     inter_rect_x1 =  torch.max(b1_x1, b2_x1)
+#     inter_rect_y1 =  torch.max(b1_y1, b2_y1)
+#     inter_rect_x2 =  torch.min(b1_x2, b2_x2)
+#     inter_rect_y2 =  torch.min(b1_y2, b2_y2)
+    
+#     #Intersection area
+#     if CUDA:
+#             inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape).cuda())*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape).cuda())
+#     else:
+#             inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape))*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape))
+    
+#     #Union Area
+#     b1_area = (b1_x2 - b1_x1 )*(b1_y2 - b1_y1 )
+#     b2_area = (b2_x2 - b2_x1 )*(b2_y2 - b2_y1 )
+    
+#     iou = inter_area / (b1_area + b2_area - inter_area)
+    
+#     return iou
+
+
+###by ultranalytics
+###https://github.com/ultralytics/yolov3/blob/master/utils/utils.py
+
+def bbox_iou(box1, box2,iou_type,CUDA=True):
+    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+    GIoU, DIoU, CIoU=iou_type
+    
+    if CUDA:
+        box2 = box2.cuda()
+        box1 = box1.cuda()
+
+    # Get the coordinates of bounding boxes
     b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,:,0], box1[:,:,1], box1[:,:,2], box1[:,:,3]
     b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,:,0], box2[:,:,1], box2[:,:,2], box2[:,:,3]
-    
-    #get the coordinates of the intersection rectangle
-    inter_rect_x1 =  torch.max(b1_x1, b2_x1)
-    inter_rect_y1 =  torch.max(b1_y1, b2_y1)
-    inter_rect_x2 =  torch.min(b1_x2, b2_x2)
-    inter_rect_y2 =  torch.min(b1_y2, b2_y2)
-    
-    #Intersection area
-    if CUDA:
-            inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape).cuda())*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape).cuda())
-    else:
-            inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape))*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape))
-    
-    #Union Area
-    b1_area = (b1_x2 - b1_x1 )*(b1_y2 - b1_y1 )
-    b2_area = (b2_x2 - b2_x1 )*(b2_y2 - b2_y1 )
-    
-    iou = inter_area / (b1_area + b2_area - inter_area)
-    
+
+    # Intersection area
+    inter = (torch.min(b1_x2, b2_x2) - torch.max(b1_x1, b2_x1)).clamp(0) * \
+            (torch.min(b1_y2, b2_y2) - torch.max(b1_y1, b2_y1)).clamp(0)
+
+    # Union Area
+    w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1
+    w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1
+    union = (w1 * h1 + 1e-16) + w2 * h2 - inter
+
+    iou = inter / union  # iou
+    if GIoU or DIoU or CIoU:
+        cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex (smallest enclosing box) width
+        ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
+        if GIoU:  # Generalized IoU https://arxiv.org/pdf/1902.09630.pdf
+            c_area = cw * ch + 1e-16  # convex area
+            return iou - (c_area - union) / c_area  # GIoU
+        if DIoU or CIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            # convex diagonal squared
+            c2 = cw ** 2 + ch ** 2 + 1e-16
+            # centerpoint distance squared
+            rho2 = ((b2_x1 + b2_x2) - (b1_x1 + b1_x2)) ** 2 / 4 + ((b2_y1 + b2_y2) - (b1_y1 + b1_y2)) ** 2 / 4
+            if DIoU:
+                return iou - rho2 / c2  # DIoU
+            elif CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                v = (4 / math.pi ** 2) * torch.pow(torch.atan(w2 / h2) - torch.atan(w1 / h1), 2)
+                with torch.no_grad():
+                    alpha = v / (1 - iou + v)
+                return iou - (rho2 / c2 + v * alpha)  # CIoU
+
     return iou
 
     
@@ -203,7 +250,7 @@ def correct_iou_mask(iou_mask,fall_into_mask):
     return iou_mask
     
 
-def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim):
+def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
     '''
     this function takes the transformed_output and
     the target box in respect to the resized image size
@@ -213,6 +260,9 @@ def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim):
     targets is a list
     '''
     #first transpose the centered normalised target coords
+    ignore_threshold=hyperparameters['iou_ignore_thresh']
+    iou_type=hyperparameters['iou_type']
+    
     centered_target=transpose_target(targets)[:,:,0:2]
     #multiply by inp_dim then devide by stride to get the relative grid size coordinates, floor the result to get the corresponding cell
     centered_target=torch.floor(centered_target*inp_dim/strd)
@@ -229,7 +279,7 @@ def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim):
     best_responsible_coord=get_abs_coord(best_bboxes)
     targets=transpose_target(get_abs_coord(targets))*inp_dim
     #calculate best iou and mask
-    responsible_iou=bbox_iou(best_responsible_coord,targets,True)
+    responsible_iou=bbox_iou(best_responsible_coord,targets,iou_type,CUDA=True)
     responsible_iou[responsible_iou.ne(responsible_iou)] = 0
     responsible_mask=responsible_iou.max(dim=0)[0] == responsible_iou
     
@@ -237,9 +287,9 @@ def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim):
         responsible_mask=correct_iou_mask(responsible_mask,fall_into_mask)
 
     abs_coord=get_abs_coord(transformed_output)
-    iou=bbox_iou(abs_coord,targets,True)
+    iou=bbox_iou(abs_coord,targets,iou_type,CUDA=True)
     iou[iou.ne(iou)] = 0
-    ignore_mask=0.5<=iou
+    ignore_mask=ignore_threshold<=iou
     noobj_mask=~same_picture_mask(responsible_mask.clone()|ignore_mask,mask)
 #     print(targets)
 #     print(abs_coord.shape)
@@ -264,7 +314,7 @@ def transform_groundtruth(target,anchors,cx_cy,strd):
     
     return target[:,0:4]
 
-def yolo_loss(pred,gt,noobj_box,mask):
+def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
     '''
     the targets correspon to single image,
     multiple targets can appear in the same image
@@ -284,34 +334,73 @@ def yolo_loss(pred,gt,noobj_box,mask):
     total_loss=0
     no_obj_conf_loss=0
     no_obj_counter=0
-    gamma=1
-    alpha=0.5
-    weights,w_cls=helper.get_idf(gt,mask)
-    area_weights=helper.get_area_weights(gt)
-    weights=(weights).unsqueeze(1)
+    lcoord=hyperparameters['lcoord']
+    lno_obj=hyperparameters['lno_obj']
+    gamma=hyperparameters['gamma']
     
-    pred[:,0] = torch.sigmoid(pred[:,0])
-    pred[:,1]= torch.sigmoid(pred[:,1])
-    xy_loss=nn.MSELoss(reduction='none')
-    
+    if hyperparameters['tfidf']==True:
+        weights,w_cls=helper.get_idf(gt,mask)
+        weights=(weights).unsqueeze(1)
+    else:
+        weights=1
+        
+
+    if hyperparameters['reduction']=='sum':
+        
+        pred[:,0] = torch.sigmoid(pred[:,0])
+        pred[:,1]= torch.sigmoid(pred[:,1])
+        xy_loss=nn.MSELoss(reduction='none')
 #     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
-    xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
-    
-    wh_loss=nn.MSELoss(reduction='none')
-    wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
+        xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
+        wh_loss=nn.MSELoss(reduction='none')
+        wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
 #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
+#     bce_class=nn.BCELoss(reduction='none')
+        focal_loss=csloss.FocalLoss(reduction='none',gamma=0)
+        class_loss=(weights*focal_loss(pred[:,5:],gt[:,5:])).sum()
     
-    bce_class=nn.BCELoss(reduction='none')
-#     focal_loss=csloss.FocalLoss(reduction='none',alpha=0.5)
-    class_loss=(weights*bce_class(pred[:,5:],gt[:,5:])).sum()
+        bce_obj=nn.BCELoss(reduction='none')
+        confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
+        
+    elif hyperparameters['reduction']=='mean':
+        
+        pred[:,0] = torch.sigmoid(pred[:,0])
+        pred[:,1]= torch.sigmoid(pred[:,1])
+        xy_loss=nn.MSELoss(reduction='none')
+#     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
+        xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).mean()
+        wh_loss=nn.MSELoss(reduction='none')
+        wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).mean()
+#     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
+#     bce_class=nn.BCELoss(reduction='none')
+        focal_loss=csloss.FocalLoss(reduction='none',gamma=gamma)
+        class_loss=(weights*focal_loss(pred[:,5:],gt[:,5:])).mean()
     
-    bce_obj=nn.BCELoss(reduction='none')
-    confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
+        bce_obj=nn.BCELoss(reduction='none')
+        confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).mean()
     
     
-    bce_noobj=nn.BCELoss(reduction='sum')
+    bce_noobj=nn.BCELoss(reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
+
+
+    total_loss=lcoord*(xy_coord_loss+wh_coord_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss
+    
+    if hyperparameters['reduction']=='sum':
+        total_loss=total_loss/sum(mask)
+    
+    return total_loss
+
+
+
+
+
+
+
+
+
+
 #     xy_loss=(helper.normalize(pred[:,:2])*torch.log(helper.normalize(pred[:,:2])/helper.normalize(gt[:,:2]))+helper.normalize(gt[:,:2])*torch.log(helper.normalize(gt[:,:2])/helper.normalize(pred[:,:2])))/2
 
 #     xy_loss =xy_loss +torch.sqrt(torch.abs(gt[:,:2]-pred[:,:2]).mean())
@@ -331,22 +420,6 @@ def yolo_loss(pred,gt,noobj_box,mask):
 #     no_obj_conf_loss =no_obj_conf_loss +(noobj_box)**2
 
 #     xy_loss=helper.kl_div(gt[:,:2],pred[:,:2]).mean()
-
-    total_loss=5*xy_coord_loss+5*wh_coord_loss+confidence_loss+no_obj_conf_loss+class_loss
-    total_loss=total_loss/sum(mask)
-    
-    return total_loss
-
-
-
-
-
-
-
-
-
-
-
 
 
 

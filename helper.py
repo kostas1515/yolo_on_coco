@@ -95,14 +95,11 @@ def get_idf(gt,mask):
     return tfidf,idf
 
 def get_area_weights(gt):
-    wh=torch.exp(gt[:,2:4])
-    area=wh[:,0]*wh[:,1]
-    weights=torch.sigmoid(1/area).cuda()
+    area=torch.abs(gt[:,2]*gt[:,3])
+    weights=torch.softmax(torch.sqrt(area),dim=0).cuda()
     
     return weights
-    
-
-    
+  
     
 
 def write_pred(imgname,pred_final,inp_dim):

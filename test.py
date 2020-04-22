@@ -17,11 +17,18 @@ from BoundingBoxes import BoundingBoxes
 
 def get_map(model,confidence,iou_threshold):
     
-    inp_dim=model.inp_dim
-    pw_ph=model.pw_ph
-    cx_cy=model.cx_cy
-    stride=model.stride
-
+    if type(model) is nn.DataParallel:
+        inp_dim=model.module.inp_dim
+        pw_ph=model.module.pw_ph
+        cx_cy=model.module.cx_cy
+        stride=model.module.stride
+    else:
+        inp_dim=model.inp_dim
+        pw_ph=model.pw_ph
+        cx_cy=model.cx_cy
+        stride=model.stride
+        
+    model.eval()
 
     
 
