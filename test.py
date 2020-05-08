@@ -29,9 +29,9 @@ def get_map(model,confidence,iou_threshold):
         stride=model.stride
         
     model.eval()
-
     
-
+    
+    max_detections=None
     transformed_dataset=Coco(partition='val',
                                                transform=transforms.Compose([
                                                 ResizeToTensor(inp_dim)
@@ -67,7 +67,7 @@ def get_map(model,confidence,iou_threshold):
         pred_final=[pred_final[i][indices[i],:] for i in range(len(pred_final))]
 
     #     pred_final[:,0:4]=pred_final[:,0:4]/inp_dim
-        helper.write_pred(img_name,pred_final,inp_dim)
+        helper.write_pred(img_name,pred_final,inp_dim,max_detections)
         
     boundingboxes = helper.getBoundingBoxes()
         

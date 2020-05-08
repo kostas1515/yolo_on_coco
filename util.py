@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import helper as helper
 import custom_loss as csloss
+import pandas as pd
 # from gluoncv import loss as gloss
    
 def transform(prediction,anchors,x_y_offset,stride,CUDA = True):
@@ -339,8 +340,12 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
     gamma=hyperparameters['gamma']
     
     if hyperparameters['tfidf']==True:
-        weights,w_cls=helper.get_idf(gt,mask)
-        weights=(weights).unsqueeze(1)
+        if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
+            weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'])
+            weights=(weights).unsqueeze(1)
+        else:
+            weights=helper.get_idf(gt,mask)
+            weights=(weights).unsqueeze(1)
     else:
         weights=1
         

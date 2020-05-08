@@ -10,12 +10,13 @@ from darknet import *
 import darknet as dn
 import util as util
 import torch.optim as optim
-
+import test as tester
 import sys
 import timeit
 import torch.autograd
 import helper as helper
 from torch.utils.tensorboard import SummaryWriter
+import pandas as pd
 
 
 
@@ -25,8 +26,9 @@ pw_ph=net.pw_ph.to(device='cuda')
 cx_cy=net.cx_cy.to(device='cuda')
 stride=net.stride.to(device='cuda')
 
+
 hyperparameters={'lr':0.0001,
-                 'batch_size':20,
+                 'batch_size':16,
                  'weight_decay':0.001,
                  'momentum':0.9,
                  'optimizer':'sgd',
@@ -37,12 +39,18 @@ hyperparameters={'lr':0.0001,
                  'iou_type':(0,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
                  'iou_ignore_thresh':0.5,
                  'tfidf':True,
+                 'idf_weights':True,
                  'workers':2,
-                 'path':'pretrained',
+                 'path':'pretrained16_precomp_obj_no_soft',
                  'reduction':'sum'}
 
-
 print(hyperparameters)
+
+if (hyperparameters['idf_weights']==True):
+    hyperparameters['idf_weights']=pd.read_csv('../idf.csv')
+else:
+    hyperparameters['idf_weights']=False
+        
 '''
 when loading weights from dataparallel model then, you first need to instatiate the dataparallel model 
 if you start fresh then first model.load_weights and then make it parallel
@@ -103,7 +111,7 @@ elif hyperparameters['otimizer']=='adam':
 
 lambda1 = lambda epoch: 0.95**epoch
 scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
-
+mAP_max=0
 epochs=50
 total_loss=0
 write=0
@@ -196,7 +204,7 @@ for e in range(epochs):
     writer.add_scalar('mAP/valid', mAP, e)
     
     if mAP>mAP_max:
-        torch.save(model.state_dict(), PATH)
+        torch.save(model.state_dict(), PATH+'.pth')
         mAP_max=mAP
     scheduler.step()
     print('\ntotal number of misses is ' + str(misses))
