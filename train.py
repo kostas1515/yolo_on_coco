@@ -28,7 +28,7 @@ stride=net.stride.to(device='cuda')
 
 
 hyperparameters={'lr':0.0001,
-                 'batch_size':16,
+                 'batch_size':32,
                  'weight_decay':0.001,
                  'momentum':0.9,
                  'optimizer':'sgd',
@@ -41,7 +41,7 @@ hyperparameters={'lr':0.0001,
                  'tfidf':True,
                  'idf_weights':True,
                  'workers':2,
-                 'path':'pretrained16_precomp_obj_no_soft',
+                 'path':'pretrained32_precomp_obj_soft',
                  'reduction':'sum'}
 
 print(hyperparameters)

@@ -22,13 +22,18 @@ for file in files:
         
     sys.stdout.write('\rPgr:'+str(prg_counter/dataset_len*100)+'%')
     prg_counter+=1
+    
 
+# obj_idf=load_csvs() for parallel
 obj_idf=(df['class'].value_counts(normalize=True).reset_index(name='obj_idf'))
 new_df=df.groupby('filename')['class'].value_counts().reset_index(name='count')
 img_idf=new_df['class'].value_counts(normalize=True).reset_index(name='img_idf')
 
 obj_idf['img_idf']=img_idf['img_idf']
 
+# fig=obj_idf.plot(x='img_idf',y='obj_idf',kind='scatter').get_figure()
+# fig.savefig('obj_img_idf-corr.png')
+# obj_idf.corr()
 
 #parallel implementation
 def my_read_csv(filename):

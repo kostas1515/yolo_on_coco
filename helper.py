@@ -93,7 +93,7 @@ def get_idf(gt,mask):
     classes=gt[:,5:].max(1)[1]
     
     tfidf=tf*idf[classes]
-#     tfidf=torch.softmax(tfidf,dim=0)
+    tfidf=torch.softmax(tfidf,dim=0)
     
     return tfidf
 
@@ -108,7 +108,7 @@ def get_precomputed_idf(gt,mask,obj_idf):
     idf=-torch.log(idf)
     
     tfidf=tf*idf
-#     tfidf=torch.softmax(tfidf,dim=0)
+    tfidf=torch.softmax(tfidf,dim=0)
     
     return tfidf
 
@@ -292,27 +292,31 @@ def rotate_box(corners,angle,  cx, cy, h, w):
         Numpy array of shape `N x 8` containing N rotated bounding boxes each described by their 
         corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`
     """
-    print(corners.shape)
     corners = corners.reshape(-1,2)
-    print(corners.shape)
-#     corners = torch.stack((corners, torch.ones((corners.shape[0],1))),dim=1)
+    corners = torch.cat([corners, torch.ones((corners.shape[0],1))],dim=1)
     
     M = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
     
+    print(M)
+    print(cx,cy)
     
     cos = np.abs(M[0, 0])
     sin = np.abs(M[0, 1])
     
     nW = int((h * sin) + (w * cos))
     nH = int((h * cos) + (w * sin))
+    print(nW,nH)
     # adjust the rotation matrix to take into account translation
-    M[0, 2] += (nW / 2) - cx
-    M[1, 2] += (nH / 2) - cy
+#     M[0, 2] += (int(nW / 2) - cx)
+#     M[1, 2] += (int(nH / 2) - cy)
+    M[0, 2]=M[0, 2]/w
+    M[1, 2]=M[1, 2]/h
+    print(M)
+    
+    
     # Prepare the vector to be transformed
     M=torch.tensor(M,dtype=torch.float32)
-    print(M.shape)
-    calculated = (M*corners.T).T
-    print(calculated.shape)
+    calculated = torch.mm(M,corners.T).T
     calculated = calculated.reshape(-1,8)
 
     return calculated
@@ -340,12 +344,19 @@ def get_enclosing_box(corners):
     x_ = corners[:,[0,2,4,6]]
     y_ = corners[:,[1,3,5,7]]
     
-    xmin = torch.min(x_,torch.ones(x_.shape)).reshape(-1,1)
-    ymin = torch.min(y_,torch.ones(y_.shape)).reshape(-1,1)
-    xmax = torch.max(x_,torch.ones(x_.shape)).reshape(-1,1)
-    ymax = torch.max(y_,torch.ones(y_.shape)).reshape(-1,1)
+    xmin = torch.min(x_,dim=1)[0].reshape(-1,1)
+    ymin = torch.min(y_,dim=1)[0].reshape(-1,1)
+    xmax = torch.max(x_,dim=1)[0].reshape(-1,1)
+    ymax = torch.max(y_,dim=1)[0].reshape(-1,1)
     
-    final = torch.stack((xmin, ymin, xmax, ymax,corners[:,8:]),dim=1)
+    w=xmax-xmin
+    h=ymax-ymin
+    xc=xmin + w/2
+    yc=ymin + h/2
+    
+#     final = torch.cat([xmin, ymin, xmax, ymax,corners[:,8:]],dim=1)
+    
+    final = torch.cat([xc, yc, w, h,corners[:,8:]],dim=1)
     
     return final
 
