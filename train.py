@@ -28,7 +28,7 @@ stride=net.stride.to(device='cuda')
 
 
 hyperparameters={'lr':0.0001,
-                 'batch_size':32,
+                 'batch_size':16,
                  'weight_decay':0.001,
                  'momentum':0.9,
                  'optimizer':'sgd',
@@ -41,7 +41,7 @@ hyperparameters={'lr':0.0001,
                  'tfidf':True,
                  'idf_weights':True,
                  'workers':2,
-                 'path':'pretrained32_precomp_obj_soft',
+                 'path':'pretrained16_precomp_obj_soft_augm',
                  'reduction':'sum'}
 
 print(hyperparameters)
@@ -92,7 +92,8 @@ except FileNotFoundError:
 
 transformed_dataset=Coco(partition='train',
                                            transform=transforms.Compose([
-                                            ResizeToTensor(inp_dim),
+                                            Augment(),
+                                            ResizeToTensor(inp_dim)
                                            ]))
 
 

@@ -239,11 +239,11 @@ def get_corners(bboxes):
         corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`      
         
     """
-    width = bboxes[:,2]
-    height = bboxes[:,3]
+    width = bboxes[:,2]-bboxes[:,0]
+    height = bboxes[:,3]-bboxes[:,1]
     
-    x1 = bboxes[:,0]-width/2
-    y1 = bboxes[:,1]-height/2
+    x1 = bboxes[:,0]
+    y1 = bboxes[:,1]
     
     x2 = x1 + width
     y2 = y1 
@@ -297,21 +297,16 @@ def rotate_box(corners,angle,  cx, cy, h, w):
     
     M = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
     
-    print(M)
-    print(cx,cy)
     
     cos = np.abs(M[0, 0])
     sin = np.abs(M[0, 1])
     
-    nW = int((h * sin) + (w * cos))
-    nH = int((h * cos) + (w * sin))
-    print(nW,nH)
+    nW = ((h * sin) + (w * cos))
+    nH = ((h * cos) + (w * sin))
     # adjust the rotation matrix to take into account translation
-#     M[0, 2] += (int(nW / 2) - cx)
-#     M[1, 2] += (int(nH / 2) - cy)
-    M[0, 2]=M[0, 2]/w
-    M[1, 2]=M[1, 2]/h
-    print(M)
+    M[0, 2] += ((nW / 2) - cx)
+    M[1, 2] += ((nH / 2) - cy)
+    
     
     
     # Prepare the vector to be transformed
@@ -343,23 +338,59 @@ def get_enclosing_box(corners):
     """
     x_ = corners[:,[0,2,4,6]]
     y_ = corners[:,[1,3,5,7]]
-    
+
     xmin = torch.min(x_,dim=1)[0].reshape(-1,1)
     ymin = torch.min(y_,dim=1)[0].reshape(-1,1)
     xmax = torch.max(x_,dim=1)[0].reshape(-1,1)
     ymax = torch.max(y_,dim=1)[0].reshape(-1,1)
     
-    w=xmax-xmin
-    h=ymax-ymin
-    xc=xmin + w/2
-    yc=ymin + h/2
     
-#     final = torch.cat([xmin, ymin, xmax, ymax,corners[:,8:]],dim=1)
     
-    final = torch.cat([xc, yc, w, h,corners[:,8:]],dim=1)
+#     w=xmax-xmin
+#     h=ymax-ymin
+#     xc=xmin + w/2
+    
+#     yc=(ymin + h/2 +ymax-h/2)/2
+    
+    final = torch.cat([xmin, ymin, xmax, ymax,corners[:,8:]],dim=1)
+    
+#     final = torch.cat([xc, yc, w, h,corners[:,8:]],dim=1)
     
     return final
 
+
+def convert2_abs(bboxes,shape):
+        
+    (h,w,c)=shape
+        
+    bboxes[:,1]=bboxes[:,1]*w
+    bboxes[:,2]=bboxes[:,2]*h
+    bboxes[:,3]=bboxes[:,3]*w
+    bboxes[:,4]=bboxes[:,4]*h
+    bboxes[:,1]=bboxes[:,1]-bboxes[:,3]/2
+    bboxes[:,2]=bboxes[:,2]-bboxes[:,4]/2
+    bboxes[:,3]=bboxes[:,1]+bboxes[:,3]
+    bboxes[:,4]=bboxes[:,2]+bboxes[:,4]
+        
+    return bboxes
+    
+def convert2_rel(bboxes,shape):
+        
+    (h,w,c)=shape
+        
+    bboxes[:,1]=bboxes[:,1]/w
+    bboxes[:,2]=bboxes[:,2]/h
+    bboxes[:,3]=bboxes[:,3]/w
+    bboxes[:,4]=bboxes[:,4]/h
+        
+    bboxes[:,1] = (bboxes[:,3]- bboxes[:,1])/2 +bboxes[:,1]
+    bboxes[:,2] = (bboxes[:,4]- bboxes[:,2])/2 +bboxes[:,2]
+
+    bboxes[:,3] = 2*(bboxes[:,3]- bboxes[:,1])
+    bboxes[:,4] = 2*(bboxes[:,4]- bboxes[:,2])
+        
+    return bboxes
+        
 
 def write_pred(imgname,pred_final,inp_dim,max_detections):
     for i in range(len(pred_final)):
