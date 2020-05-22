@@ -86,7 +86,7 @@ class ResizeToTensor(object):
         b=sample['boxes']
         
         img = cv2.resize(img, (self.scale,self.scale))          #Resize to the input dimension
-        img_ =  img.transpose((2,0,1))  # BGR -> RGB | H x W x C -> C x H x W 
+        img_ =  img.transpose((2,0,1))# H x W x C -> C x H x W 
         img_ = img_/255.0       #Add a channel at 0 (for batch) | Normalise
         img_ = torch.from_numpy(img_).float()     #Convert to float
         img_ = Variable(img_,requires_grad=False)# Convert to Variable

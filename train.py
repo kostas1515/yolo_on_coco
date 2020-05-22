@@ -40,8 +40,9 @@ hyperparameters={'lr':0.0001,
                  'iou_ignore_thresh':0.5,
                  'tfidf':True,
                  'idf_weights':True,
-                 'workers':2,
-                 'path':'pretrained16_precomp_obj_soft_augm',
+                 'augment':False,
+                 'workers':4,
+                 'path':'pretrained16_obj_idf_class+coord_no_soft',
                  'reduction':'sum'}
 
 print(hyperparameters)
@@ -89,12 +90,11 @@ except FileNotFoundError:
     else:
         model=net
         
-
-transformed_dataset=Coco(partition='train',
-                                           transform=transforms.Compose([
-                                            Augment(),
-                                            ResizeToTensor(inp_dim)
-                                           ]))
+if hyperparameters['augment']==True:
+    transformed_dataset=Coco(partition='train',transform=transforms.Compose([Augment(),ResizeToTensor(inp_dim)]))
+else:
+    transformed_dataset=Coco(partition='train',transform=transforms.Compose([ResizeToTensor(inp_dim)]))
+    
 
 
 writer = SummaryWriter('../results/'+hyperparameters['path'])

@@ -97,20 +97,20 @@ def get_idf(gt,mask):
     
     return tfidf
 
-def get_precomputed_idf(gt,mask,obj_idf):
+def get_precomputed_idf(gt,mask,obj_idf,col_name):
     
     tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
 
     classes=gt[:,5:].max(1)[1]
     
-    idf=np.array(obj_idf['obj_idf'][classes.tolist()])
+    idf=np.array(obj_idf[col_name][classes.tolist()])
     idf=torch.tensor(idf,device='cuda')
     idf=-torch.log(idf)
     
     tfidf=tf*idf
-    tfidf=torch.softmax(tfidf,dim=0)
+#     tfidf=torch.softmax(tfidf,dim=0)
     
-    return tfidf
+    return tfidf.unsqueeze(1)
 
 
 

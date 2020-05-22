@@ -341,13 +341,14 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
     
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
-            weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'])
-            weights=(weights).unsqueeze(1)
+            class_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name='obj_idf')
+            scale_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name='area_idf')
         else:
             weights=helper.get_idf(gt,mask)
             weights=(weights).unsqueeze(1)
     else:
-        weights=1
+        class_weights=1
+        scale_weights=1
         
 
     if hyperparameters['reduction']=='sum':
@@ -356,16 +357,19 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
         pred[:,1]= torch.sigmoid(pred[:,1])
         xy_loss=nn.MSELoss(reduction='none')
 #     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
-        xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
+        xy_coord_loss= (scale_weights*xy_loss(pred[:,0:2],gt[:,0:2])).sum()
+#         xy_coord_loss= (xy_loss(pred[:,0:2],gt[:,0:2])).sum()
         wh_loss=nn.MSELoss(reduction='none')
-        wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
+        wh_coord_loss= (scale_weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
+#         wh_coord_loss= (wh_loss(pred[:,2:4],gt[:,2:4])).sum()
 #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
 #     bce_class=nn.BCELoss(reduction='none')
         focal_loss=csloss.FocalLoss(reduction='none',gamma=0)
-        class_loss=(weights*focal_loss(pred[:,5:],gt[:,5:])).sum()
+        class_loss=(class_weights*focal_loss(pred[:,5:],gt[:,5:])).sum()
     
         bce_obj=nn.BCELoss(reduction='none')
-        confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
+#         confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
+        confidence_loss=(bce_obj(pred[:,4],gt[:,4])).sum()
         
     elif hyperparameters['reduction']=='mean':
         
@@ -373,16 +377,16 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
         pred[:,1]= torch.sigmoid(pred[:,1])
         xy_loss=nn.MSELoss(reduction='none')
 #     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
-        xy_coord_loss= (weights*xy_loss(pred[:,0:2],gt[:,0:2])).mean()
+        xy_coord_loss= (scale_weights*xy_loss(pred[:,0:2],gt[:,0:2])).mean()
         wh_loss=nn.MSELoss(reduction='none')
-        wh_coord_loss= (weights*wh_loss(pred[:,2:4],gt[:,2:4])).mean()
+        wh_coord_loss= (scale_weights*wh_loss(pred[:,2:4],gt[:,2:4])).mean()
 #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
 #     bce_class=nn.BCELoss(reduction='none')
         focal_loss=csloss.FocalLoss(reduction='none',gamma=gamma)
-        class_loss=(weights*focal_loss(pred[:,5:],gt[:,5:])).mean()
+        class_loss=(class_weights*focal_loss(pred[:,5:],gt[:,5:])).mean()
     
         bce_obj=nn.BCELoss(reduction='none')
-        confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).mean()
+        confidence_loss=(class_weights*bce_obj(pred[:,4],gt[:,4])).mean()
     
     
     bce_noobj=nn.BCELoss(reduction=hyperparameters['reduction'])
