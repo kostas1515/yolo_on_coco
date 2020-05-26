@@ -420,7 +420,7 @@ def getBoundingBoxes():
     import glob
     import os
     # Read ground truths
-    currentPath = '..'
+    currentPath = '../'
     folderGT = os.path.join(currentPath,'labels/coco/labels/val2017')
     os.chdir(folderGT)
     files = glob.glob("*.txt")

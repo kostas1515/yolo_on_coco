@@ -322,7 +322,7 @@ class Evaluator:
         # mpre.append(0)
         [mpre.append(e) for e in prec]
         # mpre.append(0)
-        recallValues = np.linspace(0, 1, 11)
+        recallValues = np.linspace(0, 1, 101)
         recallValues = list(recallValues[::-1])
         rhoInterp = []
         recallValid = []
@@ -337,7 +337,7 @@ class Evaluator:
             recallValid.append(r)
             rhoInterp.append(pmax)
         # By definition AP = sum(max(precision whose recall is above r))/11
-        ap = sum(rhoInterp) / 11
+        ap = sum(rhoInterp) / 101
         # Generating values for the plot
         rvals = []
         rvals.append(recallValid[0])

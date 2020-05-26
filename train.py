@@ -36,13 +36,14 @@ hyperparameters={'lr':0.0001,
                  'gamma':0,
                  'lcoord':5,
                  'lno_obj':1,
-                 'iou_type':(0,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
+                 'iou_type':(1,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
                  'iou_ignore_thresh':0.5,
                  'tfidf':True,
                  'idf_weights':True,
+                 'tfidf_col_names':['obj_freq','obj_freq','obj_freq','obj_freq','softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
                  'augment':False,
                  'workers':4,
-                 'path':'pretrained16_obj_idf_class+coord_no_soft',
+                 'path':'tes_iou',
                  'reduction':'sum'}
 
 print(hyperparameters)
@@ -169,8 +170,13 @@ for e in range(epochs):
         if(strd.shape[0]==sum(mask)):#this means that iou_mask failed and was all true, because max of zeros is true for all lenght of mask strd
             targets[:,:,0:4]=targets[:,:,0:4]*inp_dim
             targets=targets.squeeze(0)
-            targets[:,0:4]=util.transform_groundtruth(targets,anchors,offset,strd)
-            with torch.autograd.set_detect_anomaly(True):
+            if hyperparameters['iou_type']==(0,0,0):
+                targets[:,0:4]=util.transform_groundtruth(targets,anchors,offset,strd)
+                loss=util.yolo_loss(raw_pred,targets,noobj_box,mask,hyperparameters)
+                loss.backward()
+                optimizer.step()
+            else:
+                raw_pred=util.transform(raw_pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0)).squeeze(0)
                 loss=util.yolo_loss(raw_pred,targets,noobj_box,mask,hyperparameters)
                 loss.backward()
                 optimizer.step()
