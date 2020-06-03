@@ -310,13 +310,13 @@ def transform_groundtruth(target,anchors,cx_cy,strd):
     '''
     target[:,0:4]=target[:,0:4]/strd
     target[:,0:2]=target[:,0:2]-cx_cy
-    target[:,0:2][target[:,0:2]==0] =1E-5
+#     target[:,0:2][target[:,0:2]==0] =1E-5
 #     target[:,0:2]=torch.log(target[:,0:2]/(1-target[:,0:2])).clamp(min=-10, max=10)
     target[:,2:4]=torch.log(target[:,2:4]/anchors)
     
     return target[:,0:4]
 
-def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
+def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters):
     '''
     the targets correspon to single image,
     multiple targets can appear in the same image
@@ -344,24 +344,21 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
     gamma=hyperparameters['gamma']
     iou_type=hyperparameters['iou_type']
     
-    if(iou_type==(0,0,0)):#this means normal training with mse
-        pred[:,0] = torch.sigmoid(pred[:,0])
-        pred[:,1]= torch.sigmoid(pred[:,1])
     
+
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
-            class_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
-            scale_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][1])
-            x_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][2])
-            y_weights=helper.get_precomputed_idf(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][3])
+            class_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
+            scale_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][1])
+            x_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][2]) 
+            y_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][3])
             if(hyperparameters['tfidf_col_names'][4]=='softmax'):
                 class_weights=torch.softmax(class_weights,dim=0)
                 scale_weights=torch.softmax(scale_weights,dim=0)
                 x_weights=torch.softmax(x_weights,dim=0)
                 y_weights=torch.softmax(y_weights,dim=0)
         else:#below code NEEDS FIXING
-            class_weights=helper.get_idf(gt,mask)
-            class_weights=(class_weights).unsqueeze(1)
+            class_weights=helper.get_idf(pred,mask)
             scale_weights=class_weights
             x_weights=class_weights
             y_weights=class_weights
@@ -370,7 +367,15 @@ def yolo_loss(pred,gt,noobj_box,mask,hyperparameters):
         scale_weights=1
         x_weights=1
         y_weights=1
-        
+    
+    if(iou_type==(0,0,0)):#this means normal training with mse
+        pred[:,0] = torch.sigmoid(pred[:,0])
+        pred[:,1]= torch.sigmoid(pred[:,1])
+        gt[:,0:4]=gt[:,0:4]*inp_dim
+        gt[:,0:4]=transform_groundtruth(gt,anchors,offset,strd)
+    else:
+        pred=transform(pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0)).squeeze(0)
+    
 
     if hyperparameters['reduction']=='sum':
         if iou_type!=(0,0,0):

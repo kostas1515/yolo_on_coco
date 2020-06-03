@@ -16,7 +16,7 @@ print(dataset_len)
 for file in files:
     with open(file) as f:
         f=f.read()
-        box=pd.DataFrame([x.split() for x in f.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
+        box=pd.DataFrame([map(float,x.split()) for x in f.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
         box['filename']=[file for x in f.rstrip('\n').split('\n')]
         df = df.append(box, ignore_index = True)
         
@@ -30,6 +30,19 @@ new_df=df.groupby('filename')['class'].value_counts().reset_index(name='count')
 img_idf=new_df['class'].value_counts(normalize=True).reset_index(name='img_idf')
 
 obj_idf['img_idf']=img_idf['img_idf']
+
+total_bins=df['class'].value_counts()
+print(total_bins)
+yc_idf=df.groupby('class')['yc'].sum()
+xc_idf=df.groupby('class')['xc'].sum()
+
+df['area']=df['w']*df['h']
+area_idf=df.groupby('class')['area'].sum()
+
+
+obj_idf['xc']=(xc_idf/total_bins)
+obj_idf['yc']=(yc_idf/total_bins)
+obj_idf['area']=(area_idf/total_bins)
 
 # fig=obj_idf.plot(x='img_idf',y='obj_idf',kind='scatter').get_figure()
 # fig.savefig('obj_img_idf-corr.png')

@@ -51,11 +51,17 @@ def uncollapse(predictions,mask):
     
     return new
 
+def coco80_to_coco91_class(label):
+    x= [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
+         35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+         64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
+    
+    return x[int(label)]
 
 def my_collate(batch):
     write=0
     boxes=[]
-    img_name=[]
+    image_meta=[]
     pictures=[]
     for el in filter(None,batch):
         if write==0:
@@ -64,8 +70,8 @@ def my_collate(batch):
         else:
             pictures=torch.cat((pictures,el['images'].unsqueeze(-4)),0)
         boxes.append(el['boxes'])
-        img_name.append(el['img_name'])
-    return pictures,boxes,img_name
+        image_meta.append({'img_name':el['img_name'],'img_size':el['img_size']})
+    return pictures,boxes,image_meta
 
 
 def standard(tensor):
@@ -84,18 +90,18 @@ def kl_div(pred,gt):
     return kl
 
 def get_idf(gt,mask):
-    corpus_length=len(mask)
-    tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
-    idf=torch.stack([gt[:i,5:].sum(axis=0) for i in mask],dim=0)
-    idf[idf>1]=1
-    idf=torch.log(corpus_length/idf.sum(axis=0))
-    idf[idf== float('inf')] = 0
-    classes=gt[:,5:].max(1)[1]
+    corpus_length=sum(mask)
+#     tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
+    tf=1
+    idf=gt[:,5:].sum(axis=0).cuda()
+
+    idf=torch.log(corpus_length/idf)
     
+    classes=gt[:,5:].max(1)[1]
     tfidf=tf*idf[classes]
     tfidf=torch.softmax(tfidf,dim=0)
     
-    return tfidf
+    return tfidf.unsqueeze(1)
 
 def get_precomputed_idf(gt,mask,obj_idf,col_name):
     
@@ -113,250 +119,42 @@ def get_precomputed_idf(gt,mask,obj_idf,col_name):
     return tfidf.unsqueeze(1)
 
 
+def get_weights(gt,mask,obj_idf,col_name):
+    '''
+    this function takes the ground truth loc or scale of the object belonging in a batch 
+    and returns the diff from the average, which is calculated from the whole dataset.
+    '''
+    classes=gt[:,5:].max(1)[1]
+    if col_name=='area':
+        var=torch.tensor(obj_idf[col_name]).cuda()
+        dset_var=var[classes.tolist()]
+        gt_var=gt[:,3]*gt[:,2]
+    elif col_name=='xc':
+        var=torch.tensor(obj_idf[col_name]).cuda()
+        dset_var=var[classes.tolist()]
+        gt_var=gt[:,0]
+    elif col_name=='yc':
+        var=torch.tensor(obj_idf[col_name]).cuda()
+        dset_var=var[classes.tolist()]
+        gt_var=gt[:,1]
+    elif (col_name=='obj_freq')|(col_name=='img_freq'):
+#         tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
+        tf=1
+        idf=np.array(obj_idf[col_name][classes.tolist()])
+        idf=torch.tensor(idf,device='cuda')
+        idf=-torch.log(idf)
+        tfidf=tf*idf
+        return tfidf.unsqueeze(1)
+    elif (col_name=='random'):
+        return torch.rand(gt.shape[0]).unsqueeze(1).cuda()
+    else:
+        return torch.tensor(1.0)
+    
+    weights=torch.abs(dset_var-gt_var)
+    
+    return weights.unsqueeze(1)
+    
 
-def get_area_weights(gt):
-    area=torch.abs(gt[:,2]*gt[:,3])
-    weights=torch.softmax(torch.sqrt(area),dim=0).cuda()
-    
-    return weights
-
-def clip_box(bbox, alpha):
-    """Clip the bounding boxes to the borders of an image
-    
-    Parameters
-    ----------
-    
-    bbox: numpy.ndarray
-        Numpy array containing bounding boxes of shape `N X 4` where N is the 
-        number of bounding boxes and the bounding boxes are represented in the
-        format `xc yc w h`
-        
-    alpha: float
-        If the fraction of a bounding box left in the image after being clipped is 
-        less than `alpha` the bounding box is dropped. 
-    
-    Returns
-    -------
-    
-    numpy.ndarray
-        Numpy array containing **clipped** bounding boxes of shape `N X 4` where N is the 
-        number of bounding boxes left are being clipped and the bounding boxes are represented in the
-        format `xc yc w h` 
-    
-    """
-    ar_=bbox[:,2]*bbox[:,3]
-    
-    x1=bbox[:,0]-bbox[:,2]/2
-    y1=bbox[:,1]-bbox[:,3]/2
-    x2=bbox[:,0]+bbox[:,2]/2
-    y2=bbox[:,1]+bbox[:,3]/2
-    
-    x_min = torch.max(x1,torch.zeros(x1.shape))
-    y_min = torch.max(y1,torch.zeros(y1.shape))
-    x_max = torch.min(x2,torch.ones(x2.shape))
-    y_max = torch.min(y2,torch.ones(y2.shape))
-    
-    in_area_=(x_max-x_min)*(y_max-y_min)
-    
-    delta_area = ((ar_ - in_area_)/ar_)
-    
-    mask = delta_area < (1 - alpha)
-
-    
-    bbox = bbox[mask,:]
-
-
-    return bbox
-  
-
-def rotate_im(image, angle):
-    """Rotate the image.
-    
-    Rotate the image such that the rotated image is enclosed inside the tightest
-    rectangle. The area not occupied by the pixels of the original image is colored
-    black. 
-    
-    Parameters
-    ----------
-    
-    image : numpy.ndarray
-        numpy image
-    
-    angle : float
-        angle by which the image is to be rotated
-    
-    Returns
-    -------
-    
-    numpy.ndarray
-        Rotated Image
-    
-    """
-    # grab the dimensions of the image and then determine the
-    # centre
-    (h, w) = image.shape[:2]
-    (cX, cY) = (w // 2, h // 2)
-
-    # grab the rotation matrix (applying the negative of the
-    # angle to rotate clockwise), then grab the sine and cosine
-    # (i.e., the rotation components of the matrix)
-    M = cv2.getRotationMatrix2D((cX, cY), angle, 1.0)
-    cos = np.abs(M[0, 0])
-    sin = np.abs(M[0, 1])
-
-    # compute the new bounding dimensions of the image
-    nW = int((h * sin) + (w * cos))
-    nH = int((h * cos) + (w * sin))
-
-    # adjust the rotation matrix to take into account translation
-    M[0, 2] += (nW / 2) - cX
-    M[1, 2] += (nH / 2) - cY
-
-    # perform the actual rotation and return the image
-    image = cv2.warpAffine(image, M, (nW, nH))
-
-#    image = cv2.resize(image, (w,h))
-    return image
-
-
-def get_corners(bboxes):
-    
-    """Get corners of bounding boxes
-    
-    Parameters
-    ----------
-    
-    bboxes: numpy.ndarray
-        Numpy array containing bounding boxes of shape `N X 4` where N is the 
-        number of bounding boxes and the bounding boxes are represented in the
-        format `xc yc w h`
-    
-    returns
-    -------
-    
-    numpy.ndarray
-        Numpy array of shape `N x 8` containing N bounding boxes each described by their 
-        corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`      
-        
-    """
-    width = bboxes[:,2]-bboxes[:,0]
-    height = bboxes[:,3]-bboxes[:,1]
-    
-    x1 = bboxes[:,0]
-    y1 = bboxes[:,1]
-    
-    x2 = x1 + width
-    y2 = y1 
-    
-    x3 = x1
-    y3 = y1 + height
-    
-    x4 = x1 + width
-    y4 = y1 + height
-    
-    corners = torch.stack((x1,y1,x2,y2,x3,y3,x4,y4),dim=1)
-    
-    return corners
-
-def rotate_box(corners,angle,  cx, cy, h, w):
-    
-    """Rotate the bounding box.
-    
-    
-    Parameters
-    ----------
-    
-    corners : numpy.ndarray
-        Numpy array of shape `N x 8` containing N bounding boxes each described by their 
-        corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`
-    
-    angle : float
-        angle by which the image is to be rotated
-        
-    cx : int
-        x coordinate of the center of image (about which the box will be rotated)
-        
-    cy : int
-        y coordinate of the center of image (about which the box will be rotated)
-        
-    h : int 
-        height of the image
-        
-    w : int 
-        width of the image
-    
-    Returns
-    -------
-    
-    numpy.ndarray
-        Numpy array of shape `N x 8` containing N rotated bounding boxes each described by their 
-        corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`
-    """
-    corners = corners.reshape(-1,2)
-    corners = torch.cat([corners, torch.ones((corners.shape[0],1))],dim=1)
-    
-    M = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
-    
-    
-    cos = np.abs(M[0, 0])
-    sin = np.abs(M[0, 1])
-    
-    nW = ((h * sin) + (w * cos))
-    nH = ((h * cos) + (w * sin))
-    # adjust the rotation matrix to take into account translation
-    M[0, 2] += ((nW / 2) - cx)
-    M[1, 2] += ((nH / 2) - cy)
-    
-    
-    
-    # Prepare the vector to be transformed
-    M=torch.tensor(M,dtype=torch.float32)
-    calculated = torch.mm(M,corners.T).T
-    calculated = calculated.reshape(-1,8)
-
-    return calculated
-
-
-def get_enclosing_box(corners):
-    """Get an enclosing box for ratated corners of a bounding box
-    
-    Parameters
-    ----------
-    
-    corners : numpy.ndarray
-        Numpy array of shape `N x 8` containing N bounding boxes each described by their 
-        corner co-ordinates `x1 y1 x2 y2 x3 y3 x4 y4`  
-    
-    Returns 
-    -------
-    
-    numpy.ndarray
-        Numpy array containing enclosing bounding boxes of shape `N X 4` where N is the 
-        number of bounding boxes and the bounding boxes are represented in the
-        format `x1 y1 x2 y2`
-        
-    """
-    x_ = corners[:,[0,2,4,6]]
-    y_ = corners[:,[1,3,5,7]]
-
-    xmin = torch.min(x_,dim=1)[0].reshape(-1,1)
-    ymin = torch.min(y_,dim=1)[0].reshape(-1,1)
-    xmax = torch.max(x_,dim=1)[0].reshape(-1,1)
-    ymax = torch.max(y_,dim=1)[0].reshape(-1,1)
-    
-    
-    
-#     w=xmax-xmin
-#     h=ymax-ymin
-#     xc=xmin + w/2
-    
-#     yc=(ymin + h/2 +ymax-h/2)/2
-    
-    final = torch.cat([xmin, ymin, xmax, ymax,corners[:,8:]],dim=1)
-    
-#     final = torch.cat([xc, yc, w, h,corners[:,8:]],dim=1)
-    
-    return final
 
 
 def convert2_abs(bboxes,shape):
@@ -373,7 +171,22 @@ def convert2_abs(bboxes,shape):
     bboxes[:,4]=bboxes[:,2]+bboxes[:,4]
         
     return bboxes
-    
+
+def convert2_abs_xywh(bboxes,shape,inp_dim):
+        
+    (h,w,c)=shape
+    h=h/inp_dim
+    w=w/inp_dim
+        
+    bboxes[:,0]=bboxes[:,0]*w
+    bboxes[:,1]=bboxes[:,1]*h
+    bboxes[:,2]=bboxes[:,2]*w
+    bboxes[:,3]=bboxes[:,3]*h
+    bboxes[:,0]=bboxes[:,0]-bboxes[:,2]/2
+    bboxes[:,1]=bboxes[:,1]-bboxes[:,3]/2
+        
+    return bboxes
+
 def convert2_rel(bboxes,shape):
         
     (h,w,c)=shape
@@ -409,9 +222,21 @@ def write_pred(imgname,pred_final,inp_dim,max_detections):
             df[0]=df[0].apply(lambda x: int(x))
             df=df[:max_detections]
             
-            df.to_csv('../detections/'+imgname[i],sep=' ',header=False,index=None)
+            df.to_csv('../detections/'+imgname[i]['img_name'],sep=' ',header=False,index=None)
         else:
-            filename=open('../detections/'+imgname[i],'w')
+            filename=open('../detections/'+imgname[i]['img_name'],'w')
+
+def transform_to_COCO(img_meta,pred_final):
+    annotations=[]
+    for i in range(len(pred_final)):
+        if pred_final[i].nelement() != 0:
+            conf=pred_final[i][:,4].cpu().detach().numpy()
+            coord=pred_final[i][:,:4].cpu().detach().numpy()
+            classes=pred_final[i][:,5:].max(1)[1].cpu().detach().numpy()
+            area=(pred_final[i][:,2]*pred_final[i][:,3]).cpu().detach().numpy()
+            for j in range(coord.shape[0]):
+                annotations.append({ "segmentation":[], "area":float(area[j]), "iscrowd":0,"image_id":int(img_meta[i]['img_name'].split('.')[0]),"bbox": coord[j].tolist(),"score":float(conf[j]),"category_id": coco80_to_coco91_class(int(classes[j]))})
+    return annotations
             
 
 def getBoundingBoxes():

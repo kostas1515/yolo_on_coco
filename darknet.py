@@ -189,9 +189,9 @@ class Darknet(nn.Module):
                     pw_ph=torch.cat((pw_ph,anchs), 1) 
                     cx_cy=torch.cat((cx_cy,xyoffset), 1) 
                     stride=torch.cat((stride,strd), 1) 
-        self.pw_ph=pw_ph.to(device='cuda')
-        self.cx_cy=cx_cy.to(device='cuda')
-        self.stride=stride.to(device='cuda')
+        self.pw_ph=pw_ph.cuda()
+        self.cx_cy=cx_cy.cuda()
+        self.stride=stride.cuda()
         
     def forward(self, x, CUDA):
         modules = self.blocks[1:]

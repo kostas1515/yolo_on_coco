@@ -1,6 +1,7 @@
 from dataset import *
 import timeit 
 import cv2
+import os
 import numpy as np
 from zipfile import ZipFile
 import pandas as pd
@@ -28,6 +29,7 @@ stride=net.stride.to(device='cuda')
 
 
 hyperparameters={'lr':0.0001,
+                 'epochs':12,
                  'batch_size':16,
                  'weight_decay':0.001,
                  'momentum':0.9,
@@ -36,14 +38,14 @@ hyperparameters={'lr':0.0001,
                  'gamma':0,
                  'lcoord':5,
                  'lno_obj':1,
-                 'iou_type':(1,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
+                 'iou_type':(0,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
                  'iou_ignore_thresh':0.5,
                  'tfidf':True,
                  'idf_weights':True,
                  'tfidf_col_names':['obj_freq','obj_freq','obj_freq','obj_freq','softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
                  'augment':False,
                  'workers':4,
-                 'path':'tes_iou',
+                 'path':'dset16_cls_without_tf_sftmx',
                  'reduction':'sum'}
 
 print(hyperparameters)
@@ -58,8 +60,8 @@ when loading weights from dataparallel model then, you first need to instatiate 
 if you start fresh then first model.load_weights and then make it parallel
 '''
 try:
-    PATH = '../'+hyperparameters['path']
-    weights = torch.load(PATH)
+    PATH = '../pth/'+hyperparameters['path']+'/'
+    weights = torch.load(PATH+hyperparameters['path']+'_best.pth')
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
@@ -78,6 +80,8 @@ try:
         
 except FileNotFoundError: 
     net.load_weights("../yolov3.weights")
+    os.mkdir(PATH)
+    
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we are on a CUDA machine, this should print a CUDA device:
@@ -114,7 +118,7 @@ elif hyperparameters['otimizer']=='adam':
 lambda1 = lambda epoch: 0.95**epoch
 scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
 mAP_max=0
-epochs=50
+epochs=hyperparameters['epochs']
 total_loss=0
 write=0
 misses=0
@@ -168,18 +172,10 @@ for e in range(epochs):
         strd=strd[iou_mask.T,:]
         
         if(strd.shape[0]==sum(mask)):#this means that iou_mask failed and was all true, because max of zeros is true for all lenght of mask strd
-            targets[:,:,0:4]=targets[:,:,0:4]*inp_dim
             targets=targets.squeeze(0)
-            if hyperparameters['iou_type']==(0,0,0):
-                targets[:,0:4]=util.transform_groundtruth(targets,anchors,offset,strd)
-                loss=util.yolo_loss(raw_pred,targets,noobj_box,mask,hyperparameters)
-                loss.backward()
-                optimizer.step()
-            else:
-                raw_pred=util.transform(raw_pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0)).squeeze(0)
-                loss=util.yolo_loss(raw_pred,targets,noobj_box,mask,hyperparameters)
-                loss.backward()
-                optimizer.step()
+            loss=util.yolo_loss(raw_pred,targets,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters)
+            loss.backward()
+            optimizer.step()
             
             avg_conf=avg_conf+conf
             avg_no_conf=avg_no_conf+no_obj_conf
@@ -211,7 +207,10 @@ for e in range(epochs):
     writer.add_scalar('mAP/valid', mAP, e)
     
     if mAP>mAP_max:
-        torch.save(model.state_dict(), PATH+'.pth')
+        torch.save(model.state_dict(),PATH+hyperparameters['path']+'_best.pth')
+        mAP_max=mAP
+    else:
+        torch.save(model.state_dict(),PATH+hyperparameters['path']+'_last.pth')
         mAP_max=mAP
     scheduler.step()
     print('\ntotal number of misses is ' + str(misses))
