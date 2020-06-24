@@ -65,8 +65,8 @@ class Coco(Dataset):
 #         conf=torch.ones([b.shape[0],1])
 #         boxes=torch.cat((b.T[1:],conf.T,one_hot_target.T)).T
         
-        sample={'images': img,
-                'boxes': b,
+        sample={'images': [img],
+                'boxes': [b],
                'img_name': self.pointers.iloc[idx, 1],
                'img_size':img_size}
         
@@ -83,100 +83,100 @@ class ResizeToTensor(object):
 
     def __call__(self, sample):
         
-        img=sample['images']
-        b=sample['boxes']
+        imgs=sample['images']
+        bbs=sample['boxes']
         
-        img = cv2.resize(img, (self.scale,self.scale))          #Resize to the input dimension
-        img_ =  img.transpose((2,0,1))# H x W x C -> C x H x W 
-        img_ = img_/255.0       #Add a channel at 0 (for batch) | Normalise
-        img_ = torch.from_numpy(img_).float()     #Convert to float
-        img_ = Variable(img_,requires_grad=False)# Convert to Variable
+        imgs = [cv2.resize(i, (self.scale,self.scale)) for i in imgs]         #Resize to the input dimension
+        imgs =  [i.transpose((2,0,1)) for i in imgs]# H x W x C -> C x H x W 
+        imgs = [i/255.0 for i in imgs]       #Add a channel at 0 (for batch) | Normalise
+        imgs = [torch.from_numpy(i).float() for i in imgs]     #Convert to float
         
-        b=torch.tensor(b).type(torch.FloatTensor)
-        labels = b.T[0].reshape(b.shape[0], 1)
-        one_hot_target = (labels == torch.arange(80).reshape(1, 80)).float()
-        conf=torch.ones([b.shape[0],1])
-        boxes=torch.cat((b.T[1:],conf.T,one_hot_target.T)).T
+        bbs=[torch.tensor(b).type(torch.FloatTensor) for b in bbs]
+        labels = [b.T[0].reshape(b.shape[0], 1) for b in bbs]
+        one_hot_target = [(l == torch.arange(80).reshape(1, 80)).float() for l in labels]
+        conf=[torch.ones([b.shape[0],1]) for b in bbs]
+        bbs=[torch.cat((b.T[1:],c.T,oh.T)).T for b,c,oh in zip(bbs,conf,one_hot_target)]
         
-        sample['boxes']=boxes
-        sample['images']=img_
+        sample['boxes']=bbs
+        sample['images']=imgs
         
         return sample
 
 class Augment(object):
     
-    def __init__(self):
-        self.seq = iaa.Sequential([
-        iaa.Sometimes(
-            0.125,
-            iaa.LinearContrast(alpha=(0.1, 1.9)),
-            iaa.Fliplr(0.5)
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.Grayscale(alpha=(0.1, 0.9)),
-            iaa.Affine(
-            translate_px={"y": (-150, 150)}
-        )
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.Solarize(0.5, threshold=(0, 256)),
-            iaa.ShearX((-10, 10))
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.GaussianBlur(sigma=(0, 0.5)),
-            iaa.ShearY((-10, 10))
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.Multiply((0.8, 1.2), per_channel=0.2),
-            iaa.Affine(
-            rotate=(-30, 30)
-        )
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.HistogramEqualization(),
-            iaa.Affine(
-            translate_px={"x": (-150, 150)}
-        )
-        ),
-        iaa.Sometimes(
-            0.125,
-            iaa.GaussianBlur(sigma=(0, 0.5)),
-            iaa.Affine(
-            scale={"x": (0.8, 1.2), "y": (0.8, 1.2)}
-        )
-        )
-        
-    ], random_order=True)
+    def __init__(self,num_of_augms=1):
+        self.num_of_augms=num_of_augms
+        self.aug=iaa.OneOf([
+            iaa.Sequential([
+                iaa.LinearContrast(alpha=(0.1, 1.9)),
+                iaa.Fliplr(0.5)
+            ]),
+            iaa.Sequential([
+                iaa.Grayscale(alpha=(0.1, 0.9)),
+                iaa.Affine(
+                translate_px={"y": (-150, 150)}
+            )
+            ]),
+            iaa.Sequential([
+                iaa.Solarize(0.5, threshold=(0, 256)),
+                iaa.ShearX((-10, 10))
+            ]),
+            iaa.Sequential([
+                iaa.GaussianBlur(sigma=(0, 0.5)),
+                iaa.ShearY((-10, 10))
+            ]),
+            iaa.Sequential([
+                iaa.Multiply((0.8, 1.2), per_channel=0.2),
+                iaa.Affine(
+                rotate=(-30, 30)
+            )
+            ]),
+            iaa.Sequential([
+                iaa.HistogramEqualization(),
+                iaa.Affine(
+                translate_px={"x": (-150, 150)}
+            )
+            ]),
+            iaa.Sequential([
+                iaa.GaussianBlur(sigma=(0, 0.5)),
+                iaa.Affine(
+                scale={"x": (0.8, 1.2), "y": (0.8, 1.2)}
+            )
+            ])
+        ])
         
     def __call__(self, sample):
         
-        bboxes=np.array([])
-        while(bboxes.size==0):
-            img=sample['images']
-            bboxes=sample['boxes']
+        bbox_list=sample["boxes"]
+        img_list=sample['images']
 
-            bboxes=helper.convert2_abs(bboxes,img.shape)
+        temp_img_=img_list[0]
+        temp_b_=bbox_list[0]
+        
+        for i in range(self.num_of_augms):
+            bboxes=np.array([])
+            
+            while(bboxes.size==0):
+                bboxes=helper.convert2_abs(temp_b_,temp_img_.shape)
 
-            bbs = BoundingBoxesOnImage([
-            BoundingBox(x1=b[1], y1=b[2], x2=b[3], y2=b[4], label=b[0]) for b in bboxes], shape=img.shape)
+                bbs = BoundingBoxesOnImage([
+                BoundingBox(x1=b[1], y1=b[2], x2=b[3], y2=b[4], label=b[0]) for b in bboxes], shape=temp_img_.shape)
 
-            image_aug, bbs_aug = self.seq(image=img, bounding_boxes=bbs)
+                image_aug, bbs_aug = self.aug(image=temp_img_, bounding_boxes=bbs)
 
-            bbs_aug=bbs_aug.remove_out_of_image().clip_out_of_image()
+                bbs_aug=bbs_aug.remove_out_of_image().clip_out_of_image()
 
-            new_bboxes=bbs_aug.to_xyxy_array()
+                new_bboxes=bbs_aug.to_xyxy_array()
 
-            labels=np.array([[box.label for box in bbs_aug.bounding_boxes]]).T
-            new_bboxes=np.hstack((labels,new_bboxes))
+                labels=np.array([[box.label for box in bbs_aug.bounding_boxes]]).T
+                new_bboxes=np.hstack((labels,new_bboxes))
 
-            bboxes=helper.convert2_rel(new_bboxes,image_aug.shape)
-
-        sample["boxes"]=bboxes
-        sample['images']=image_aug
+                bboxes=helper.convert2_rel(new_bboxes,image_aug.shape)
+                temp_b_=helper.convert2_rel(temp_b_,temp_img_.shape)
+            bbox_list.append(bboxes)
+            img_list.append(image_aug)
+            
+        sample["boxes"]=bbox_list
+        sample['images']=img_list
         
         return sample

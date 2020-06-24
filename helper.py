@@ -51,6 +51,15 @@ def uncollapse(predictions,mask):
     
     return new
 
+def get_responsible_boxes(true_pred,fall_into_mask,mask):  
+    responsible_boxes=torch.empty([sum(mask),9,true_pred.shape[2]],device='cuda')
+    counter=0
+    for i in mask:
+        for j in range(i):
+            responsible_boxes[k,:,:]=true_pred[counter,fall_into_mask[k]]
+            k=k+1
+        counter=counter+1
+
 def coco80_to_coco91_class(label):
     x= [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
@@ -65,11 +74,14 @@ def my_collate(batch):
     pictures=[]
     for el in filter(None,batch):
         if write==0:
-            pictures=el['images'].unsqueeze(-4)
+            pictures=[img.unsqueeze(-4) for img in el['images']]
+            pictures=torch.cat(pictures, dim=0)
             write=1
         else:
-            pictures=torch.cat((pictures,el['images'].unsqueeze(-4)),0)
-        boxes.append(el['boxes'])
+            pics=[img.unsqueeze(-4) for img in el['images']]
+            pics=torch.cat(pics, dim=0)
+            pictures=torch.cat((pictures,pics),0)
+        boxes=boxes+el['boxes']
         image_meta.append({'img_name':el['img_name'],'img_size':el['img_size']})
     return pictures,boxes,image_meta
 
@@ -160,6 +172,7 @@ def get_weights(gt,mask,obj_idf,col_name):
 def convert2_abs(bboxes,shape):
         
     (h,w,c)=shape
+    
         
     bboxes[:,1]=bboxes[:,1]*w
     bboxes[:,2]=bboxes[:,2]*h
@@ -169,7 +182,6 @@ def convert2_abs(bboxes,shape):
     bboxes[:,2]=bboxes[:,2]-bboxes[:,4]/2
     bboxes[:,3]=bboxes[:,1]+bboxes[:,3]
     bboxes[:,4]=bboxes[:,2]+bboxes[:,4]
-        
     return bboxes
 
 def convert2_abs_xywh(bboxes,shape,inp_dim):

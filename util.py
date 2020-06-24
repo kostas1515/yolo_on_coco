@@ -186,21 +186,31 @@ def get_abs_coord(box):
     # yolo predicts center coordinates
     if torch.cuda.is_available():
         box=box.cuda()
-    x1 = (box[:,:,0] - box[:,:,2]/2) 
-    y1 = (box[:,:,1] - box[:,:,3]/2) 
-    x2 = (box[:,:,0] + box[:,:,2]/2) 
-    y2 = (box[:,:,1] + box[:,:,3]/2) 
-    
+    if (len(box.shape)==3):
+        x1 = (box[:,:,0] - box[:,:,2]/2) 
+        y1 = (box[:,:,1] - box[:,:,3]/2) 
+        x2 = (box[:,:,0] + box[:,:,2]/2) 
+        y2 = (box[:,:,1] + box[:,:,3]/2)
+    else:
+        x1 = (box[:,0] - box[:,2]/2) 
+        y1 = (box[:,1] - box[:,3]/2) 
+        x2 = (box[:,0] + box[:,2]/2) 
+        y2 = (box[:,1] + box[:,3]/2)
     return torch.stack((x1, y1, x2, y2)).T
 
 def xyxy_to_xywh(box):
     if torch.cuda.is_available():
         box=box.cuda()
-    xc = (box[:,:,2]- box[:,:,0])/2 +box[:,:,0]
-    yc = (box[:,:,3]- box[:,:,1])/2 +box[:,:,1]
-    
-    w = (box[:,:,2]- box[:,:,0])
-    h = (box[:,:,3]- box[:,:,1])
+    if (len(box.shape)==3):
+        xc = (box[:,:,2]- box[:,:,0])/2 +box[:,:,0]
+        yc = (box[:,:,3]- box[:,:,1])/2 +box[:,:,1]
+        w = (box[:,:,2]- box[:,:,0])
+        h = (box[:,:,3]- box[:,:,1])
+    else:
+        xc = (box[:,2]- box[:,0])/2 +box[:,0]
+        yc = (box[:,3]- box[:,1])/2 +box[:,1]
+        w = (box[:,2]- box[:,0])
+        h = (box[:,3]- box[:,1])
     
     return torch.stack((xc, yc, w, h)).T
 
@@ -234,7 +244,7 @@ def transpose_target(box):
 
 def correct_iou_mask(iou_mask,fall_into_mask):
     ''' this function corrects the iou when, iou max =0 
-    in that case for that object it diecides that all responsible bboxes (9)
+    in that case for that object it decides that all responsible bboxes (9)
     should be considered for optimisation
     it also corrects the mask list, so it will have same number of objects
     le_mask has the true in the index of max, aka where iou.max=0
@@ -251,7 +261,63 @@ def correct_iou_mask(iou_mask,fall_into_mask):
     iou_mask[:,le_mask]=one_hot_target
     return iou_mask
     
+def get_fall_into_mask(targets,offset,strd,inp_dim):
+    #multiply by inp_dim then devide by stride to get the relative grid size coordinates, floor the result to get the corresponding cell
+    target_xc=targets[:,0:1]
+    target_yc=targets[:,1:2]
+    centered_x=torch.floor(target_xc*inp_dim/strd.squeeze())
+    centered_y=torch.floor(target_yc*inp_dim/strd.squeeze())
+    fall_into_mask=(centered_x==offset[:,:,0])&(centered_y==offset[:,:,1])
+    
+    return fall_into_mask
 
+def build_tensors(raw_pred,true_pred,anchors,offset,stride,fall_into_mask,mask):
+    k=0
+    counter=0
+    temp_shape=raw_pred.shape[2]
+    responsible_raw_pred=torch.empty([sum(mask),9,temp_shape],device='cuda')
+    responsible_true_pred=torch.empty([sum(mask),9,temp_shape],device='cuda')
+    for i in mask:
+        for j in range(i):
+            responsible_raw_pred[k,:,:]=raw_pred[counter,fall_into_mask[k]]
+            responsible_true_pred[k,:,:]=true_pred[counter,fall_into_mask[k]]
+            k=k+1
+        counter=counter+1
+    anchors=anchors[fall_into_mask].reshape(sum(mask),9,anchors.shape[2])
+    offset=offset[fall_into_mask].reshape(sum(mask),9,offset.shape[2])
+    stride=stride[fall_into_mask].reshape(sum(mask),9,stride.shape[2])
+    return responsible_raw_pred,responsible_true_pred,anchors,offset,stride
+
+def get_iou_mask(targets,responsible_true_pred,inp_dim,hyperparameters):
+    
+    iou_type=hyperparameters['iou_type']
+    
+    targets2=get_abs_coord(targets[:,:4]*inp_dim).unsqueeze(0)#inplace operations DANGER
+    new_pred=get_abs_coord(responsible_true_pred)
+    iou=bbox_iou(new_pred,targets2,iou_type,CUDA=True)
+    iou_mask=iou.T==(iou.T.max(dim=1)[0].unsqueeze(1))
+    return iou,iou_mask
+
+def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters):
+    prev=0
+    counter=0
+    no_obj=[]
+    iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
+    iou_type=hyperparameters['iou_type']
+    for i in mask:
+        combined_fall_into_mask=fall_into_mask[prev:prev+i,:].sum(axis=0,dtype=torch.bool) 
+        noobj=true_pred[counter,~combined_fall_into_mask,4]
+        abs_box=get_abs_coord(true_pred[counter,~combined_fall_into_mask,:4])
+        abs_box=abs_box.unsqueeze(1)
+        ignore_iou=bbox_iou(abs_box,targets.unsqueeze(0)[:,prev:i+prev,:],iou_type,CUDA=True)
+        ignore_iou_mask=(ignore_iou>iou_ignore_thresh).sum(axis=1,dtype=torch.bool)
+        prev=i
+
+        no_obj.append(noobj[~ignore_iou_mask])
+        counter=counter+1
+    no_obj=torch.cat(no_obj)
+    return no_obj
+    
 def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
     '''
     this function takes the transformed_output and
@@ -287,7 +353,7 @@ def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hy
     
     if(responsible_mask.sum()>sum(mask)):
         responsible_mask=correct_iou_mask(responsible_mask,fall_into_mask)
-
+        
     abs_coord=get_abs_coord(transformed_output)
     iou=bbox_iou(abs_coord,targets,iou_type,CUDA=True)
     iou[iou.ne(iou)] = 0
@@ -345,7 +411,6 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     iou_type=hyperparameters['iou_type']
     
     
-
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
             class_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
@@ -427,51 +492,3 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     return total_loss
 
 
-
-
-
-
-
-
-
-
-#     xy_loss=(helper.normalize(pred[:,:2])*torch.log(helper.normalize(pred[:,:2])/helper.normalize(gt[:,:2]))+helper.normalize(gt[:,:2])*torch.log(helper.normalize(gt[:,:2])/helper.normalize(pred[:,:2])))/2
-
-#     xy_loss =xy_loss +torch.sqrt(torch.abs(gt[:,:2]-pred[:,:2]).mean())
-#     neg=(gt[:,5:]-pred[:,5:])<0.0
-#     classes=pred[:,5:]
-    
-#     neg_loss=-torch.log(1-classes[neg].mean())
-#     pos_loss=-torch.log(classes[~neg].mean())
-    
-        #the confidense penalty could be either 1 or the actual IoU
-#     confidence_loss =confidence_loss -alpha*((1-pred[:,4])**gamma)*torch.log(pred[:,4])
-
-#     no_obj_conf_loss =no_obj_conf_loss -(1-alpha)*((noobj_box)**gamma)*torch.log(1-noobj_box)
-
-#     confidence_loss =confidence_loss +(1-pred[:,4])**2
-
-#     no_obj_conf_loss =no_obj_conf_loss +(noobj_box)**2
-
-#     xy_loss=helper.kl_div(gt[:,:2],pred[:,:2]).mean()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    

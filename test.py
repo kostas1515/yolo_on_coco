@@ -44,7 +44,7 @@ def get_map(model,confidence,iou_threshold):
     batch_size=8
 
     dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
-                            shuffle=True,collate_fn=helper.my_collate, num_workers=2)
+                            shuffle=False,collate_fn=helper.my_collate, num_workers=2)
 
 
     for images,targets,img_name in dataloader:
