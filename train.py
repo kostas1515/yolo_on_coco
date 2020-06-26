@@ -29,7 +29,7 @@ stride=net.stride.to(device='cuda')
 
 
 hyperparameters={'lr':0.0001,
-                 'epochs':30,
+                 'epochs':20,
                  'batch_size':16,
                  'weight_decay':0.001,
                  'momentum':0.9,
@@ -45,7 +45,7 @@ hyperparameters={'lr':0.0001,
                  'tfidf_col_names':['none','none','none','none','softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
                  'augment':0,
                  'workers':4,
-                 'path':'pred_obj_idf_softm_b16',
+                 'path':'pretrained20',
                  'reduction':'sum'}
 
 print(hyperparameters)

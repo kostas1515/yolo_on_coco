@@ -298,7 +298,7 @@ def get_iou_mask(targets,responsible_true_pred,inp_dim,hyperparameters):
     iou_mask=iou.T==(iou.T.max(dim=1)[0].unsqueeze(1))
     return iou,iou_mask
 
-def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters):
+def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
     prev=0
     counter=0
     no_obj=[]
@@ -309,9 +309,10 @@ def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters):
         noobj=true_pred[counter,~combined_fall_into_mask,4]
         abs_box=get_abs_coord(true_pred[counter,~combined_fall_into_mask,:4])
         abs_box=abs_box.unsqueeze(1)
-        ignore_iou=bbox_iou(abs_box,targets.unsqueeze(0)[:,prev:i+prev,:],iou_type,CUDA=True)
+        targets2=get_abs_coord(targets[:,:4]*inp_dim).unsqueeze(0)
+        ignore_iou=bbox_iou(abs_box,targets2[:,prev:i+prev,:],iou_type,CUDA=True)
         ignore_iou_mask=(ignore_iou>iou_ignore_thresh).sum(axis=1,dtype=torch.bool)
-        prev=i
+        prev=i+prev
 
         no_obj.append(noobj[~ignore_iou_mask])
         counter=counter+1

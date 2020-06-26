@@ -25,11 +25,11 @@ inp_dim=net.inp_dim
 pw_ph=net.pw_ph.to(device='cuda')
 cx_cy=net.cx_cy.to(device='cuda')
 stride=net.stride.to(device='cuda')
-
+print('YOLO version2')
 
 hyperparameters={'lr':0.0001,
                  'epochs':30,
-                 'batch_size':16,
+                 'batch_size':32,
                  'weight_decay':0.001,
                  'momentum':0.9,
                  'optimizer':'sgd',
@@ -44,7 +44,7 @@ hyperparameters={'lr':0.0001,
                  'tfidf_col_names':['obj_freq','area','xc','yc','softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
                  'augment':0,
                  'workers':4,
-                 'path':'tfidf_soft_b16_v2',
+                 'path':'tfidf_soft_b32_v2',
                  'reduction':'sum'}
 
 print(hyperparameters)
@@ -104,7 +104,7 @@ dataset_len=(len(transformed_dataset))
 print('Length of dataset is '+ str(dataset_len)+'\n')
 batch_size=hyperparameters['batch_size']
 dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
-                        shuffle=False,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
+                        shuffle=True,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
 
 
 if hyperparameters['optimizer']=='sgd':
@@ -152,9 +152,13 @@ for e in range(epochs):
         resp_strd=resp_strd[iou_mask]
         conf=resp_raw_pred[:,4].mean().item()
         class_mask=targets[:,5:].type(torch.BoolTensor).squeeze(0)
-
-        pos_class=resp_raw_pred[:,5:][class_mask].mean().item()
-        neg_class=resp_raw_pred[:,5:][~class_mask].mean().item()
+        
+        if(iou_mask.sum()==class_mask.shape[0]):
+            pos_class=resp_raw_pred[:,5:][class_mask].mean().item()
+            neg_class=resp_raw_pred[:,5:][~class_mask].mean().item()
+        else:
+            pos_class=0
+            neg_class=0
         loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
         
         loss.backward()
