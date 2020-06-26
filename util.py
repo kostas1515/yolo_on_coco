@@ -457,7 +457,7 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     #         wh_coord_loss= (wh_loss(pred[:,2:4],gt[:,2:4])).sum()
     #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
     #     bce_class=nn.BCELoss(reduction='none')
-        focal_loss=csloss.FocalLoss(reduction='none',gamma=0)
+        focal_loss=csloss.FocalLoss(reduction='none',gamma=gamma)
         class_loss=(class_weights*focal_loss(pred[:,5:],gt[:,5:])).sum()
     
         bce_obj=nn.BCELoss(reduction='none')
@@ -482,7 +482,7 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     
     bce_noobj=nn.BCELoss(reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
-    
+
 
 
     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss

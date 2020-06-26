@@ -59,8 +59,8 @@ when loading weights from dataparallel model then, you first need to instatiate 
 if you start fresh then first model.load_weights and then make it parallel
 '''
 try:
-    PATH = '../'+hyperparameters['path']
-    weights = torch.load(PATH)
+    PATH = '../pth/'+hyperparameters['path']+'/'
+    weights = torch.load(PATH+hyperparameters['path']+'_best.pth)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
@@ -77,7 +77,11 @@ try:
         model.to(device)
         model.load_state_dict(weights)
         
-except FileNotFoundError: 
+except FileNotFoundError:
+    try:
+        os.mkdir(PATH)
+    except FileExistsError:
+        print('path already exist')
     net.load_weights("../yolov3.weights")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
