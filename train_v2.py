@@ -28,7 +28,7 @@ stride=net.stride.to(device='cuda')
 print('YOLO version2')
 
 hyperparameters={'lr':0.0001,
-                 'epochs':30,
+                 'epochs':90,
                  'batch_size':32,
                  'weight_decay':0.001,
                  'momentum':0.9,
@@ -60,7 +60,7 @@ if you start fresh then first model.load_weights and then make it parallel
 '''
 try:
     PATH = '../pth/'+hyperparameters['path']+'/'
-    weights = torch.load(PATH+hyperparameters['path']+'_best.pth)
+    weights = torch.load(PATH+hyperparameters['path']+'_best.pth')
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
@@ -147,7 +147,7 @@ for e in range(epochs):
 
         iou,iou_mask=util.get_iou_mask(targets,resp_true_pred,inp_dim,hyperparameters)
         iou=iou.T.max(dim=1)[0].mean().item()
-        no_obj=util.get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters)
+        no_obj=util.get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim)
         no_obj_conf=no_obj.mean().item()
 
         resp_raw_pred=resp_raw_pred[iou_mask]
