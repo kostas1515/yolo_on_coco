@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
 
 
-def train_yolo(weight_decay,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_type,tf_idf):
+def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_type,tf_idf):
     
     iou_type=int(iou_type)
     if(iou_type)==0:
@@ -42,7 +42,7 @@ def train_yolo(weight_decay,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_typ
                  'batch_size':16,
                  'weight_decay':weight_decay,
                  'momentum':0.9,
-                 'optimizer':'adam',
+                 'optimizer':'sgd',
                  'alpha':alpha,
                  'gamma':gamma,
                  'lcoord':lcoord,
@@ -156,7 +156,11 @@ def train_yolo(weight_decay,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_typ
             resp_offset=resp_offset[iou_mask]
             resp_strd=resp_strd[iou_mask]
             
-            loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
+            try:
+                loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
+            except RuntimeError:
+                break
+            
             try:
                 loss.backward()
                 optimizer.step()
@@ -168,4 +172,5 @@ def train_yolo(weight_decay,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_typ
             mAP_max=mAP
         else:
             break
+    print(mAP_max)
     return mAP_max

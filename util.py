@@ -296,6 +296,12 @@ def get_iou_mask(targets,responsible_true_pred,inp_dim,hyperparameters):
     new_pred=get_abs_coord(responsible_true_pred)
     iou=bbox_iou(new_pred,targets2,iou_type,CUDA=True)
     iou_mask=iou.T==(iou.T.max(dim=1)[0].unsqueeze(1))
+    
+    iou_max,iou_max_index=(iou_mask.sum(axis=1).max(axis=0))
+    while iou_max>1:
+        iou_mask[iou_max_index][torch.randint(0,9,[1])]=False
+        iou_mask[iou_max_index]=~iou_mask[iou_max_index]
+        iou_max,iou_max_index=(iou_mask.sum(axis=1).max(axis=0))
     return iou,iou_mask
 
 def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
