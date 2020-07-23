@@ -15,7 +15,7 @@ from BoundingBox import BoundingBox
 from BoundingBoxes import BoundingBoxes
 
 
-def get_map(model,confidence,iou_threshold):
+def get_map(model,confidence,iou_threshold,coco_version):
     
     if type(model) is nn.DataParallel:
         inp_dim=model.module.inp_dim
@@ -32,7 +32,7 @@ def get_map(model,confidence,iou_threshold):
     
     
     max_detections=None
-    transformed_dataset=Coco(partition='val',
+    transformed_dataset=Coco(partition='val',coco_version=coco_version,
                                                transform=transforms.Compose([
                                                 ResizeToTensor(inp_dim)
                                                ]))
@@ -44,7 +44,7 @@ def get_map(model,confidence,iou_threshold):
     batch_size=8
 
     dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
-                            shuffle=False,collate_fn=helper.my_collate, num_workers=2)
+                            shuffle=False,collate_fn=helper.my_collate, num_workers=4)
 
 
     for images,targets,img_name in dataloader:
@@ -67,9 +67,9 @@ def get_map(model,confidence,iou_threshold):
         pred_final=[pred_final[i][indices[i],:] for i in range(len(pred_final))]
 
     #     pred_final[:,0:4]=pred_final[:,0:4]/inp_dim
-        helper.write_pred(img_name,pred_final,inp_dim,max_detections)
+        helper.write_pred(img_name,pred_final,inp_dim,max_detections,coco_version)
         
-    boundingboxes = helper.getBoundingBoxes()
+    boundingboxes = helper.getBoundingBoxes(coco_version)
         
 
     evaluator = Evaluator()

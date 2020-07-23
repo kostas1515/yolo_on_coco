@@ -217,7 +217,7 @@ def convert2_rel(bboxes,shape):
     return bboxes
         
 
-def write_pred(imgname,pred_final,inp_dim,max_detections):
+def write_pred(imgname,pred_final,inp_dim,max_detections,coco_version):
     for i in range(len(pred_final)):
         if pred_final[i].nelement() != 0:
             coord=pred_final[i][:,:4].cpu().detach().numpy()/inp_dim
@@ -234,9 +234,9 @@ def write_pred(imgname,pred_final,inp_dim,max_detections):
             df[0]=df[0].apply(lambda x: int(x))
             df=df[:max_detections]
             
-            df.to_csv('../detections/'+imgname[i]['img_name'],sep=' ',header=False,index=None)
+            df.to_csv('../detections/coco'+coco_version+'/'+imgname[i]['img_name'],sep=' ',header=False,index=None)
         else:
-            filename=open('../detections/'+imgname[i]['img_name'],'w')
+            filename=open('../detections/coco'+coco_version+'/'+imgname[i]['img_name'],'w')
 
 def transform_to_COCO(img_meta,pred_final):
     annotations=[]
@@ -251,14 +251,14 @@ def transform_to_COCO(img_meta,pred_final):
     return annotations
             
 
-def getBoundingBoxes():
+def getBoundingBoxes(coco_version):
     """Read txt files containing bounding boxes (ground truth and detections)."""
     allBoundingBoxes = BoundingBoxes()
     import glob
     import os
     # Read ground truths
     currentPath = '../'
-    folderGT = os.path.join(currentPath,'labels/coco/labels/val2017')
+    folderGT = os.path.join(currentPath,'labels/coco/labels/val'+coco_version)
     os.chdir(folderGT)
     files = glob.glob("*.txt")
     files.sort()
@@ -287,7 +287,7 @@ def getBoundingBoxes():
             allBoundingBoxes.addBoundingBox(bb)
         fh1.close()
     # Read detections
-    folderDet = os.path.join(currentPath,'../../../detections')
+    folderDet = os.path.join(currentPath,'../../../detections/coco'+coco_version)
     os.chdir(folderDet)
     files = glob.glob("*.txt")
     files.sort()
@@ -317,4 +317,5 @@ def getBoundingBoxes():
             bb = BoundingBox(nameOfImage, idClass,x,y,w,h,typeCoordinates=CoordinatesType.Relative,imgSize=(416,416),bbType=BBType.Detected, classConfidence=confidence, format=BBFormat.XYWH)
             allBoundingBoxes.addBoundingBox(bb)
         fh1.close()
+    os.chdir('../../yolo')
     return allBoundingBoxes

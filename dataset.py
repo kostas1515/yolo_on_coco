@@ -18,7 +18,7 @@ from imgaug.augmentables.bbs import BoundingBox, BoundingBoxesOnImage
 
 class Coco(Dataset):
 
-    def __init__(self, partition, transform=None):
+    def __init__(self, partition,coco_version, transform=None):
         """
         Args:
             zip_file (string): Path to the zip file with annotations.
@@ -26,15 +26,15 @@ class Coco(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
-
-        self.pointers=pd.read_csv('../pointers/'+partition+'2017.txt',names=['img'])
+        
+        self.pointers=pd.read_csv('../pointers/'+partition+coco_version+'.txt',names=['img'])
         self.pointers['box']=self.pointers['img'].apply(lambda x: x.split('.')[0]+'.txt')
-        
-        
-        self.my_image_path = os.path.join('../images',partition+'2017')
-        
-        
-        self.my_label_path=os.path.join('../labels/coco/labels',partition+'2017')
+        if coco_version=='2017':
+            self.my_image_path = os.path.join('../images',partition+'2017/')
+            self.my_label_path=os.path.join('../labels/coco/labels',partition+'2017/')
+        elif coco_version=='2014':
+            self.my_image_path = '../images'
+            self.my_label_path='../labels/coco/labels'
         
         self.transform = transform
         
@@ -45,11 +45,13 @@ class Coco(Dataset):
     def __getitem__(self, idx):
         img_path=os.path.join(self.my_image_path,self.pointers.iloc[idx, 0])
         label_path=os.path.join(self.my_label_path,self.pointers.iloc[idx, 1])
+        
         try:
             with open(label_path) as box:
                 box=box.read()
                 box=pd.DataFrame([x.split() for x in box.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
         except FileNotFoundError:
+            print(label_path)
             return None
         
         try:
@@ -67,7 +69,7 @@ class Coco(Dataset):
         
         sample={'images': [img],
                 'boxes': [b],
-               'img_name': self.pointers.iloc[idx, 1],
+               'img_name': self.pointers.iloc[idx, 1].split('/')[-1],
                'img_size':img_size}
         
         if self.transform:

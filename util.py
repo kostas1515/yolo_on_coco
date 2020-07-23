@@ -323,6 +323,11 @@ def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
         no_obj.append(noobj[~ignore_iou_mask])
         counter=counter+1
     no_obj=torch.cat(no_obj)
+    
+    #random sampling
+#     threshold=sum(mask)/no_obj.shape[0]*4
+#     no_obj=no_obj[torch.rand([no_obj.shape[0]])<threshold]
+
     return no_obj
     
 def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
@@ -488,8 +493,14 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     
     bce_noobj=nn.BCELoss(reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
-
-
+    
+#     print(gt.shape[0])
+#     print('iou_loss is:',iou_loss)
+#     print('xy_loss is:',xy_coord_loss)
+#     print('wh_coord_loss is:',wh_coord_loss)
+#     print('confidence_loss is:',confidence_loss)
+#     print('no_obj_conf_loss is:',no_obj_conf_loss)
+#     print('class_loss is:',class_loss)
 
     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss
     

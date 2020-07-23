@@ -27,28 +27,29 @@ cx_cy=net.cx_cy.to(device='cuda')
 stride=net.stride.to(device='cuda')
 print('YOLO version2')
 
-hyperparameters={'lr':0.0001,
-                 'epochs':90,
-                 'batch_size':32,
-                 'weight_decay':0.001,
-                 'momentum':0.9,
-                 'optimizer':'sgd',
-                 'alpha':0.5,
-                 'gamma':0,
-                 'lcoord':5,
-                 'lno_obj':1,
-                 'iou_type':(0,0,0),#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
-                 'iou_ignore_thresh':0.5,
-                 'tfidf':True,
-                 'idf_weights':True,
-                 'tfidf_col_names':['obj_freq','area','xc','yc','softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
-                 'augment':0,
-                 'workers':4,
-                 'path':'tfidf_soft_b32_v2',
-                 'reduction':'sum'}
+hyperparameters={'lr': 0.0001, 
+                 'epochs': 15,
+                 'coco_version': '2014', #can be either '2014' or '2017'
+                 'batch_size': 16,
+                 'weight_decay': 0.001,
+                 'momentum': 0.9, 
+                 'optimizer': 'sgd', 
+                 'alpha': 0.9, 
+                 'gamma': 0, 
+                 'lcoord': 5,
+                 'lno_obj': 0.1,
+                 'iou_type': (0, 0, 0),
+                 'iou_ignore_thresh': 0.5, 
+                 'tfidf': True, 
+                 'idf_weights': True, 
+                 'tfidf_col_names': ['img_freq', 'area', 'xc', 'yc', 'no_softmax'],
+                 'augment': 0, 
+                 'workers': 4, 
+                 'path': 'tfidf', 
+                 'reduction': 'sum'}
 
 print(hyperparameters)
-
+coco_version=hyperparameters['coco_version']
 if (hyperparameters['idf_weights']==True):
     hyperparameters['idf_weights']=pd.read_csv('../idf.csv')
 else:
@@ -82,7 +83,7 @@ except FileNotFoundError:
         os.mkdir(PATH)
     except FileExistsError:
         print('path already exist')
-    net.load_weights("../yolov3.weights")
+#     net.load_weights("../yolov3.weights")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we are on a CUDA machine, this should print a CUDA device:
@@ -97,9 +98,9 @@ except FileNotFoundError:
         model=net
         
 if hyperparameters['augment']>0:
-    transformed_dataset=Coco(partition='train',transform=transforms.Compose([Augment(hyperparameters['augment']),ResizeToTensor(inp_dim)]))
+    transformed_dataset=Coco(partition='train',coco_version=coco_version,transform=transforms.Compose([Augment(hyperparameters['augment']),ResizeToTensor(inp_dim)]))
 else:
-    transformed_dataset=Coco(partition='train',transform=transforms.Compose([ResizeToTensor(inp_dim)]))
+    transformed_dataset=Coco(partition='train',coco_version=coco_version,transform=transforms.Compose([ResizeToTensor(inp_dim)]))
     
 
 
@@ -116,7 +117,7 @@ if hyperparameters['optimizer']=='sgd':
 elif hyperparameters['otimizer']=='adam':
     optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
 
-lambda1 = lambda epoch: 0.95**epoch
+lambda1 = lambda epoch: 1.15**epoch
 scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
 mAP_max=0
 epochs=hyperparameters['epochs']
@@ -163,22 +164,28 @@ for e in range(epochs):
         else:
             pos_class=0
             neg_class=0
-        loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
+        try:
+            loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
         
-        loss.backward()
-        optimizer.step()
+            loss.backward()
+            optimizer.step()
         
-        avg_conf=avg_conf+conf
-        avg_no_conf=avg_no_conf+no_obj_conf
-        avg_pos=avg_pos+pos_class
-        avg_neg=avg_neg+neg_class
-        total_loss=total_loss+loss.item()
-        avg_iou=avg_iou+iou
-    #     sys.stdout.write('\rPgr:'+str(prg_counter/dataset_len*100*batch_size)+'%' ' L:'+ str(loss.item()))
-    #     sys.stdout.write(' IoU:' +str(iou)+' pob:'+str(conf)+ ' nob:'+str(no_obj_conf))
-    #     sys.stdout.write(' PCls:' +str(pos_class)+' ncls:'+str(neg_class))
-    #     sys.stdout.flush()
-    mAP=tester.get_map(model,confidence=0.01,iou_threshold=0.5)
+            avg_conf=avg_conf+conf
+            avg_no_conf=avg_no_conf+no_obj_conf
+            avg_pos=avg_pos+pos_class
+            avg_neg=avg_neg+neg_class
+            total_loss=total_loss+loss.item()
+            avg_iou=avg_iou+iou
+#             prg_counter=prg_counter+1
+#             sys.stdout.write('\rPgr:'+str(prg_counter/dataset_len*100*batch_size)+'%' ' L:'+ str(loss.item()))
+#             sys.stdout.write(' IoU:' +str(iou)+' pob:'+str(conf)+ ' nob:'+str(no_obj_conf))
+#             sys.stdout.write(' PCls:' +str(pos_class)+' ncls:'+str(neg_class))
+#             sys.stdout.flush()
+        except RuntimeError:
+            print('bad training result in NAN')
+            del resp_raw_pred,resp_true_pred,resp_anchors,resp_offset,resp_strd,images,targets,anchors,offset,strd,mask,img_names,no_obj,iou,iou_mask,fall_into_mask
+            torch.cuda.empty_cache()
+    mAP=tester.get_map(model,confidence=0.01,iou_threshold=0.5,coco_version=coco_version)
     writer.add_scalar('Loss/train', total_loss/train_counter, e)
     writer.add_scalar('AIoU/train', avg_iou/train_counter, e)
     writer.add_scalar('PConf/train', avg_conf/train_counter, e)

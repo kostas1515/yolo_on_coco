@@ -39,6 +39,7 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
     
     hyperparameters={'lr':0.0001,
                  'epochs':10,
+                 'coco_version':'2014',
                  'batch_size':16,
                  'weight_decay':weight_decay,
                  'momentum':0.9,
@@ -56,7 +57,7 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
                  'workers':4,
                  'path':'bayesian_opt',
                  'reduction':'sum'}
-    
+    coco_version=hyperparameters['coco_version']
     net = Darknet("../cfg/yolov3.cfg")
     inp_dim=net.inp_dim
     pw_ph=net.pw_ph.to(device='cuda')
@@ -106,9 +107,9 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
             model=net
 
     if hyperparameters['augment']>0:
-        transformed_dataset=Coco(partition='train',transform=transforms.Compose([Augment(hyperparameters['augment']),ResizeToTensor(inp_dim)]))
+        transformed_dataset=Coco(partition='train',coco_version=coco_version,transform=transforms.Compose([Augment(hyperparameters['augment']),ResizeToTensor(inp_dim)]))
     else:
-        transformed_dataset=Coco(partition='train',transform=transforms.Compose([ResizeToTensor(inp_dim)]))
+        transformed_dataset=Coco(partition='train',coco_version=coco_version,transform=transforms.Compose([ResizeToTensor(inp_dim)]))
 
     dataset_len=(len(transformed_dataset))
     batch_size=hyperparameters['batch_size']
