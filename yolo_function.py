@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
 
 
-def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thresh,iou_type,tf_idf):
+def train_yolo(weight_decay,momentum,gamma,lcoord,lno_obj,iou_ignore_thresh,iou_type):
     
     iou_type=int(iou_type)
     if(iou_type)==0:
@@ -31,32 +31,28 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
     else:
         iou_type=(0,0,1)
     
-    tf_idf=int(round(tf_idf))
-    if tf_idf==0:
-        tf_idf=False
-    else:
-        tf_idf=True
     
     hyperparameters={'lr':0.0001,
-                 'epochs':10,
+                 'epochs':1,
                  'coco_version':'2014',
-                 'batch_size':16,
+                 'batch_size':8,
                  'weight_decay':weight_decay,
                  'momentum':0.9,
                  'optimizer':'sgd',
-                 'alpha':alpha,
+                 'alpha':0.5,
                  'gamma':gamma,
                  'lcoord':lcoord,
                  'lno_obj':lno_obj,
                  'iou_type':iou_type,#(GIoU,DIoU,CIoU) default is 0,0,0 for iou
                  'iou_ignore_thresh':iou_ignore_thresh,
-                 'tfidf':tf_idf,
+                 'tfidf':True,
                  'idf_weights':True,
-                 'tfidf_col_names':['obj_freq','area','xc','yc','no_softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
+                 'tfidf_col_names':['img_freq','area','xc','yc','no_softmax'], #default is ['obj_freq/img_freq','area','xc','yc','softmax']-->[class_weights,scale_weights,xweights,yweights,softmax/no_softmax]
                  'augment':0,
                  'workers':4,
                  'path':'bayesian_opt',
                  'reduction':'sum'}
+    
     coco_version=hyperparameters['coco_version']
     net = Darknet("../cfg/yolov3.cfg")
     inp_dim=net.inp_dim
@@ -64,7 +60,7 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
     cx_cy=net.cx_cy.to(device='cuda')
     stride=net.stride.to(device='cuda')
 
-    print(hyperparameters)
+#     print(hyperparameters)
 
     if (hyperparameters['idf_weights']==True):
         hyperparameters['idf_weights']=pd.read_csv('../idf.csv')
@@ -97,12 +93,11 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
         net.load_weights("../yolov3.weights")
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        # Assuming that we are on a CUDA machine, this should print a CUDA device:
-
         net.to(device)
         if (torch.cuda.device_count() > 1):
             model = nn.DataParallel(net)
             model.to(device)
+            print(device)
         else:
             model=net
 
@@ -114,7 +109,7 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
     dataset_len=(len(transformed_dataset))
     batch_size=hyperparameters['batch_size']
     dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
-                            shuffle=False,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
+                            shuffle=True,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
 
 
     if hyperparameters['optimizer']=='sgd':
@@ -122,10 +117,9 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
     elif hyperparameters['optimizer']=='adam':
         optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
 
-    lambda1 = lambda epoch: 0.95**epoch
-    scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
     mAP_max=0
     epochs=hyperparameters['epochs']
+    break_flag=0
     for e in range(epochs):
         total_loss=0
         write=0
@@ -159,19 +153,15 @@ def train_yolo(weight_decay,momentum,gamma,alpha,lcoord,lno_obj,iou_ignore_thres
             
             try:
                 loss=util.yolo_loss(resp_raw_pred,targets,no_obj,mask,resp_anchors,resp_offset,resp_strd,inp_dim,hyperparameters)
-            except RuntimeError:
-                break
-            
-            try:
                 loss.backward()
                 optimizer.step()
             except RuntimeError:
-                print('\nthe sum is:',sum(mask))
-
-        mAP=tester.get_map(model,confidence=0.01,iou_threshold=0.5)
-        if mAP>mAP_max:
-            mAP_max=mAP
+                break_flag=1
+                break
+                
+        if(break_flag==0):
+            mAP=tester.get_map(model,confidence=0.01,iou_threshold=0.5,coco_version=coco_version)
         else:
-            break
-    print(mAP_max)
-    return mAP_max
+            mAP=0
+
+    return mAP

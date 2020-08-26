@@ -28,8 +28,9 @@ stride=net.stride.to(device='cuda')
 print('YOLO version2')
 
 hyperparameters={'lr': 0.0001, 
-                 'epochs': 15,
-                 'coco_version': '2014', #can be either '2014' or '2017'
+                 'epochs': 90,
+                 'resume_from':13,
+                 'coco_version': '2017', #can be either '2014' or '2017'
                  'batch_size': 16,
                  'weight_decay': 0.001,
                  'momentum': 0.9, 
@@ -37,15 +38,15 @@ hyperparameters={'lr': 0.0001,
                  'alpha': 0.9, 
                  'gamma': 0, 
                  'lcoord': 5,
-                 'lno_obj': 0.1,
+                 'lno_obj': 0.5,
                  'iou_type': (0, 0, 0),
                  'iou_ignore_thresh': 0.5, 
                  'tfidf': True, 
                  'idf_weights': True, 
                  'tfidf_col_names': ['img_freq', 'area', 'xc', 'yc', 'no_softmax'],
-                 'augment': 0, 
+                 'augment': 1, 
                  'workers': 4, 
-                 'path': 'tfidf', 
+                 'path': 'yolo2017_semiprtnd', 
                  'reduction': 'sum'}
 
 print(hyperparameters)
@@ -83,7 +84,7 @@ except FileNotFoundError:
         os.mkdir(PATH)
     except FileExistsError:
         print('path already exist')
-#     net.load_weights("../yolov3.weights")
+    net.load_weights("../yolov3.weights")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # Assuming that we are on a CUDA machine, this should print a CUDA device:
@@ -117,11 +118,12 @@ if hyperparameters['optimizer']=='sgd':
 elif hyperparameters['otimizer']=='adam':
     optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
 
-lambda1 = lambda epoch: 1.15**epoch
-scheduler=optim.lr_scheduler.LambdaLR(optimizer, lambda1, last_epoch=-1)
+scheduler=optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience=3)
 mAP_max=0
 epochs=hyperparameters['epochs']
-for e in range(epochs):
+resume_from=hyperparameters['resume_from']
+break_flag=0
+for e in range(resume_from,epochs+resume_from):
     total_loss=0
     write=0
     misses=0
@@ -176,16 +178,20 @@ for e in range(epochs):
             avg_neg=avg_neg+neg_class
             total_loss=total_loss+loss.item()
             avg_iou=avg_iou+iou
-#             prg_counter=prg_counter+1
+            prg_counter=prg_counter+1
 #             sys.stdout.write('\rPgr:'+str(prg_counter/dataset_len*100*batch_size)+'%' ' L:'+ str(loss.item()))
 #             sys.stdout.write(' IoU:' +str(iou)+' pob:'+str(conf)+ ' nob:'+str(no_obj_conf))
 #             sys.stdout.write(' PCls:' +str(pos_class)+' ncls:'+str(neg_class))
 #             sys.stdout.flush()
         except RuntimeError:
-            print('bad training result in NAN')
+#             weights = torch.load(PATH+hyperparameters['path']+'_last.pth')
+#             model.load_state_dict(weights)
+#             scheduler.step()
+            break_flag=1
             del resp_raw_pred,resp_true_pred,resp_anchors,resp_offset,resp_strd,images,targets,anchors,offset,strd,mask,img_names,no_obj,iou,iou_mask,fall_into_mask
             torch.cuda.empty_cache()
-    mAP=tester.get_map(model,confidence=0.01,iou_threshold=0.5,coco_version=coco_version)
+            break
+    mAP=tester.get_map(model,confidence=0.1,iou_threshold=0.5,coco_version=coco_version)
     writer.add_scalar('Loss/train', total_loss/train_counter, e)
     writer.add_scalar('AIoU/train', avg_iou/train_counter, e)
     writer.add_scalar('PConf/train', avg_conf/train_counter, e)
@@ -193,14 +199,18 @@ for e in range(epochs):
     writer.add_scalar('PClass/train', avg_pos/train_counter, e)
     writer.add_scalar('NClass/train', avg_neg/train_counter, e)
     writer.add_scalar('mAP/valid', mAP, e)
-    
+
     if mAP>mAP_max:
         torch.save(model.state_dict(),PATH+hyperparameters['path']+'_best.pth')
+        torch.save(model.state_dict(),PATH+hyperparameters['path']+'_last.pth')
         mAP_max=mAP
     else:
         torch.save(model.state_dict(),PATH+hyperparameters['path']+'_last.pth')
-        mAP_max=mAP
-    scheduler.step()
+    scheduler.step(mAP) 
+    if break_flag==1:
+        print(mAP)
+        print('Pgr:'+str(prg_counter/dataset_len*100*batch_size)+'%' ' L:'+ str(loss.item()))
+        break
     print('\ntotal number of misses is ' + str(misses))
     print('\n total average loss is '+str(total_loss/train_counter))
     print('\n total average iou is '+str(avg_iou/train_counter))

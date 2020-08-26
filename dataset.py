@@ -51,7 +51,7 @@ class Coco(Dataset):
                 box=box.read()
                 box=pd.DataFrame([x.split() for x in box.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
         except FileNotFoundError:
-            print(label_path)
+
             return None
         
         try:
@@ -89,9 +89,14 @@ class ResizeToTensor(object):
         bbs=sample['boxes']
         
         imgs = [cv2.resize(i, (self.scale,self.scale)) for i in imgs]         #Resize to the input dimension
-        imgs =  [i.transpose((2,0,1)) for i in imgs]# H x W x C -> C x H x W 
-        imgs = [i/255.0 for i in imgs]       #Add a channel at 0 (for batch) | Normalise
+        imgs =  [i.transpose((2,0,1)) for i in imgs]# H x W x C -> C x H x W
+        
+        imgs = [i/255.0 for i in imgs]       #Add a channel at 0 (for batch) | Normalise.
+
         imgs = [torch.from_numpy(i).float() for i in imgs]     #Convert to float
+        mean=torch.tensor([[[0.485, 0.456, 0.406]]]).T
+        std=torch.tensor([[[0.229, 0.224, 0.225]]]).T
+        imgs = [(i-mean)/std for i in imgs]
         
         bbs=[torch.tensor(b).type(torch.FloatTensor) for b in bbs]
         labels = [b.T[0].reshape(b.shape[0], 1) for b in bbs]

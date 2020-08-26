@@ -9,6 +9,7 @@ import helper as helper
 import custom_loss as csloss
 import pandas as pd
 import math
+from scipy.stats import entropy
 # from gluoncv import loss as gloss
    
 def transform(prediction,anchors,x_y_offset,stride,CUDA = True):
@@ -102,37 +103,6 @@ def get_utillities(stride,inp_dim, anchors, num_classes):
     return anchors,x_y_offset,strd
     
 
-
-
-# def bbox_iou(box1, box2,CUDA=True):
-#     """
-#     Returns the IoU of two bounding boxes 
-    
-    
-#     """
-#     #Get the coordinates of bounding boxes
-#     b1_x1, b1_y1, b1_x2, b1_y2 = box1[:,:,0], box1[:,:,1], box1[:,:,2], box1[:,:,3]
-#     b2_x1, b2_y1, b2_x2, b2_y2 = box2[:,:,0], box2[:,:,1], box2[:,:,2], box2[:,:,3]
-    
-#     #get the coordinates of the intersection rectangle
-#     inter_rect_x1 =  torch.max(b1_x1, b2_x1)
-#     inter_rect_y1 =  torch.max(b1_y1, b2_y1)
-#     inter_rect_x2 =  torch.min(b1_x2, b2_x2)
-#     inter_rect_y2 =  torch.min(b1_y2, b2_y2)
-    
-#     #Intersection area
-#     if CUDA:
-#             inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape).cuda())*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape).cuda())
-#     else:
-#             inter_area = torch.max(inter_rect_x2 - inter_rect_x1 ,torch.zeros(inter_rect_x2.shape))*torch.max(inter_rect_y2 - inter_rect_y1 , torch.zeros(inter_rect_x2.shape))
-    
-#     #Union Area
-#     b1_area = (b1_x2 - b1_x1 )*(b1_y2 - b1_y1 )
-#     b2_area = (b2_x2 - b2_x1 )*(b2_y2 - b2_y1 )
-    
-#     iou = inter_area / (b1_area + b2_area - inter_area)
-    
-#     return iou
 
 
 ###by ultranalytics
@@ -308,10 +278,12 @@ def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
     prev=0
     counter=0
     no_obj=[]
+    no_obj_iou=[]
     iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
     iou_type=hyperparameters['iou_type']
     for i in mask:
         combined_fall_into_mask=fall_into_mask[prev:prev+i,:].sum(axis=0,dtype=torch.bool) 
+#         noobj=true_pred[counter,~combined_fall_into_mask,4:]
         noobj=true_pred[counter,~combined_fall_into_mask,4]
         abs_box=get_abs_coord(true_pred[counter,~combined_fall_into_mask,:4])
         abs_box=abs_box.unsqueeze(1)
@@ -321,13 +293,27 @@ def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
         prev=i+prev
 
         no_obj.append(noobj[~ignore_iou_mask])
+#         no_obj_iou.append(1-ignore_iou.max(axis=1)[0])
+#         no_obj.append(noobj)
+#         print(ignore_iou.shape)
         counter=counter+1
-    no_obj=torch.cat(no_obj)
     
-    #random sampling
-#     threshold=sum(mask)/no_obj.shape[0]*4
-#     no_obj=no_obj[torch.rand([no_obj.shape[0]])<threshold]
+    
+    no_obj=torch.cat(no_obj)
+#     no_obj_iou=torch.cat(no_obj_iou).cpu().detach().numpy()
+    
+#     noobj_score=no_obj[:,0].cpu().detach().numpy()
+#     bits=entropy(no_obj[:,1:].cpu().detach().numpy(), base=2,axis=1)
+#     mask2 = np.zeros(noobj_score.shape[0], dtype=bool) ######## this code is from sklearns selectkbest it makes a mask with ones in selected features and zeros to not selected
+#     mask2[np.argsort(noobj_score*no_obj_iou/bits, kind="mergesort")[-sum(mask)*3:]] = True
 
+#     #random sampling
+#     threshold=sum(mask)/no_obj.shape[0]*100
+#     no_obj[torch.rand([no_obj.shape[0]])<threshold]
+
+    
+#     no_obj=torch.cat([no_obj[mask2][:,4],no_obj[torch.rand([no_obj.shape[0]])<threshold][:,4]])
+#     return no_obj[mask2][:,0]
     return no_obj
     
 def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
@@ -421,7 +407,7 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     lno_obj=hyperparameters['lno_obj']
     gamma=hyperparameters['gamma']
     iou_type=hyperparameters['iou_type']
-    
+
     
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
@@ -456,8 +442,9 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
 
     if hyperparameters['reduction']=='sum':
         if iou_type!=(0,0,0):
+            gt[:,0:4]=gt[:,0:4]*inp_dim
             iou=bbox_iou(get_abs_coord(pred[:,0:4].unsqueeze(0)),get_abs_coord(gt[:,0:4].unsqueeze(0)),iou_type)
-            iou_loss=(class_weights*(1-iou)).sum()
+            iou_loss=(1-iou).sum()
         else:
             xy_loss=nn.MSELoss(reduction='none')
     #     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
@@ -467,13 +454,14 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
             wh_coord_loss= (scale_weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
     #         wh_coord_loss= (wh_loss(pred[:,2:4],gt[:,2:4])).sum()
     #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
-    #     bce_class=nn.BCELoss(reduction='none')
-        focal_loss=csloss.FocalLoss(reduction='none',gamma=gamma)
-        class_loss=(class_weights*focal_loss(pred[:,5:],gt[:,5:])).sum()
+        bce_class=nn.BCELoss(reduction='none')
+        
+        class_loss=(class_weights*bce_class(pred[:,5:],gt[:,5:])).sum()
     
-        bce_obj=nn.BCELoss(reduction='none')
-#         confidence_loss=(weights*bce_obj(pred[:,4],gt[:,4])).sum()
-        confidence_loss=(bce_obj(pred[:,4],gt[:,4])).sum()
+#         bce_obj=nn.BCELoss(reduction=hyperparameters['reduction'])
+        bce_obj=csloss.FocalLoss(reduction=hyperparameters['reduction'],gamma=gamma)
+#         confidence_loss=(class_weights*bce_obj(pred[:,4],gt[:,4])).sum()
+        confidence_loss=(bce_obj(pred[:,4],gt[:,4]))
         
     elif hyperparameters['reduction']=='mean':
         
@@ -491,7 +479,7 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
         confidence_loss=(class_weights*bce_obj(pred[:,4],gt[:,4])).mean()
     
     
-    bce_noobj=nn.BCELoss(reduction=hyperparameters['reduction'])
+    bce_noobj=csloss.FocalLoss(reduction=hyperparameters['reduction'],gamma=gamma)
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
 #     print(gt.shape[0])

@@ -41,7 +41,7 @@ def get_map(model,confidence,iou_threshold,coco_version):
 
     dataset_len=(len(transformed_dataset))
 #     print('Length of dataset is '+ str(dataset_len)+'\n')
-    batch_size=8
+    batch_size=4
 
     dataloader = DataLoader(transformed_dataset, batch_size=batch_size,
                             shuffle=False,collate_fn=helper.my_collate, num_workers=4)
@@ -55,7 +55,7 @@ def get_map(model,confidence,iou_threshold,coco_version):
         raw_pred=raw_pred.to(device='cuda')
         true_pred=util.transform(raw_pred.clone(),pw_ph,cx_cy,stride)
         
-        sorted_pred=torch.sort(true_pred[:,:,4],descending=True)
+        sorted_pred=torch.sort(true_pred[:,:,4]*(true_pred[:,:,5:].max(axis=2)[0]),descending=True)
         pred_mask=sorted_pred[0]>confidence
         indices=[(sorted_pred[1][e,:][pred_mask[e,:]]) for e in range(pred_mask.shape[0])]
         pred_final=[true_pred[i,indices[i],:] for i in range(len(indices))]
