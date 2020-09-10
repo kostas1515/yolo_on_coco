@@ -16,6 +16,7 @@ from imgaug import parameters as iap
 import imgaug.augmenters as iaa
 from imgaug.augmentables.bbs import BoundingBox, BoundingBoxesOnImage
 
+
 class Coco(Dataset):
 
     def __init__(self, partition,coco_version, transform=None):
@@ -180,6 +181,7 @@ class Augment(object):
 
                 bboxes=helper.convert2_rel(new_bboxes,image_aug.shape)
                 temp_b_=helper.convert2_rel(temp_b_,temp_img_.shape)
+                
             bbox_list.append(bboxes)
             img_list.append(image_aug)
             

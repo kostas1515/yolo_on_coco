@@ -27,11 +27,15 @@ def get_map(model,confidence,iou_threshold,coco_version):
         pw_ph=model.pw_ph
         cx_cy=model.cx_cy
         stride=model.stride
-        
+    
+    pw_ph=pw_ph.cuda()
+    cx_cy=cx_cy.cuda()
+    stride=stride.cuda()
+    
     model.eval()
     
     
-    max_detections=None
+    max_detections=100
     transformed_dataset=Coco(partition='val',coco_version=coco_version,
                                                transform=transforms.Compose([
                                                 ResizeToTensor(inp_dim)

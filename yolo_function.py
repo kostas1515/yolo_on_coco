@@ -137,7 +137,7 @@ def train_yolo(weight_decay,momentum,gamma,lcoord,lno_obj,iou_ignore_thresh,iou_
             images=images.cuda()
             raw_pred = model(images, torch.cuda.is_available())
         #         raw_pred=helper.expand_predictions(raw_pred,mask)
-            true_pred=util.transform(raw_pred.clone(),pw_ph,cx_cy,stride)
+            true_pred=util.transform(raw_pred.clone().detach(),pw_ph,cx_cy,stride)
 
             targets,anchors,offset,strd,mask=helper.collapse_boxes(targets,pw_ph,cx_cy,stride)
             targets=targets.cuda()
@@ -145,7 +145,14 @@ def train_yolo(weight_decay,momentum,gamma,lcoord,lno_obj,iou_ignore_thresh,iou_
             resp_raw_pred,resp_true_pred,resp_anchors,resp_offset,resp_strd=util.build_tensors(raw_pred,true_pred,anchors,offset,strd,fall_into_mask,mask)
 
             iou,iou_mask=util.get_iou_mask(targets,resp_true_pred,inp_dim,hyperparameters)
-            no_obj=util.get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim)
+#             no_obj=util.get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim)
+            no_obj_mask=util.get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim)
+            k=0
+            no_obj=[]
+            for f,i in no_obj_mask:
+                no_obj.append(raw_pred[k,f][i][:,4])
+                k=k+1
+            no_obj=torch.cat(no_obj)
             resp_raw_pred=resp_raw_pred[iou_mask]
             resp_anchors=resp_anchors[iou_mask]
             resp_offset=resp_offset[iou_mask]

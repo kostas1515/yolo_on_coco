@@ -15,14 +15,8 @@ optimizer = BayesianOptimization(
     f=yolo_function.train_yolo,
     pbounds=pbounds,
     verbose=2, # verbose = 1 prints only when a maximum is observed, verbose = 0 is silent
-    random_state=88,
+    random_state=39,
 )
-
-load_logs(optimizer, logs=["../bayesian_opt_logger/logs.json"])
-
-logger = JSONLogger(path="../bayesian_opt_logger/logs.json")
-
-optimizer.subscribe(Events.OPTIMIZATION_STEP, logger)
 
 optimizer.maximize(
     init_points=10,

@@ -5,8 +5,15 @@ import cv2
 from BoundingBox import BoundingBox
 from BoundingBoxes import BoundingBoxes
 from utils import *
+import numba
+from numba import jit
+
 
 def collapse_boxes(boxes,pw_ph,cx_cy,stride):
+    '''
+    This function takes a list of bbs the predefined anchors offset and stride and 
+    creates parallel tensors of bounding boxes and their respective anchors offsets and strides.
+    '''
     write=0
     mask=[]
     for box in boxes:
@@ -115,21 +122,28 @@ def get_idf(gt,mask):
     
     return tfidf.unsqueeze(1)
 
-def get_precomputed_idf(gt,mask,obj_idf,col_name):
+def get_precomputed_idf(obj_idf,col_name):
     
-    tf=torch.tensor([1/mask[i] for i in range(len(mask)) for j in range(mask[i])]).cuda()
-
-    classes=gt[:,5:].max(1)[1]
-    
-    idf=np.array(obj_idf[col_name][classes.tolist()])
-    idf=torch.tensor(idf,device='cuda')
+    idf=np.array(obj_idf[col_name])
+    idf=torch.tensor(idf,device='cuda',dtype=torch.float)
     idf=-torch.log(idf)
     
-    tfidf=tf*idf
 #     tfidf=torch.softmax(tfidf,dim=0)
     
-    return tfidf.unsqueeze(1)
+    return idf
 
+def get_location_weights(offset,mask):
+    final=[]
+    for sl in offset.tolist():
+        final.append(''.join(str(sl)))
+    weights=[]
+    values, counts = np.unique(final, return_counts=True)
+    counts=np.log(len(mask)/counts)
+    for el in final:
+        for k,v in enumerate(values):
+            if v==el:
+                weights.append(counts[k])
+    return torch.tensor(weights,device='cuda')
 
 def get_weights(gt,mask,obj_idf,col_name):
     '''
@@ -172,7 +186,6 @@ def get_weights(gt,mask,obj_idf,col_name):
 def convert2_abs(bboxes,shape):
         
     (h,w,c)=shape
-    
         
     bboxes[:,1]=bboxes[:,1]*w
     bboxes[:,2]=bboxes[:,2]*h
@@ -183,6 +196,7 @@ def convert2_abs(bboxes,shape):
     bboxes[:,3]=bboxes[:,1]+bboxes[:,3]
     bboxes[:,4]=bboxes[:,2]+bboxes[:,4]
     return bboxes
+
 
 def convert2_abs_xywh(bboxes,shape,inp_dim):
         
@@ -198,6 +212,8 @@ def convert2_abs_xywh(bboxes,shape,inp_dim):
     bboxes[:,1]=bboxes[:,1]-bboxes[:,3]/2
         
     return bboxes
+
+
 
 def convert2_rel(bboxes,shape):
         

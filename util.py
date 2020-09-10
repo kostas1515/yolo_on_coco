@@ -12,7 +12,7 @@ import math
 from scipy.stats import entropy
 # from gluoncv import loss as gloss
    
-def transform(prediction,anchors,x_y_offset,stride,CUDA = True):
+def transform(prediction,anchors,x_y_offset,stride,CUDA = True,only_coord=False):
     '''
     This function takes the raw predicted output from yolo last layer in the correct
     '[batch_size,3*grid*grid,4+1+class_num] * grid_scale' size and transforms it into the real world coordinates
@@ -29,6 +29,12 @@ def transform(prediction,anchors,x_y_offset,stride,CUDA = True):
     prediction[:,:,:2] = prediction[:,:,:2]*(stride)
     #log space transform height and the width
     prediction[:,:,2:4] = torch.exp(prediction[:,:,2:4]).clamp(max=1E4)*anchors*stride
+    
+    if(only_coord==False):
+    #Sigmoid object confidencce
+        prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
+#         prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
+        prediction[:,:,5:] = torch.softmax((prediction[:,:, 5 :]).clone(),dim=2)
     
     return prediction
 
@@ -51,16 +57,7 @@ def predict(prediction, inp_dim, anchors, num_classes, CUDA = True):
     prediction = prediction.view(batch_size, bbox_attrs*num_anchors, grid_size*grid_size)
     prediction = prediction.transpose(1,2).contiguous()
     prediction = prediction.view(batch_size, grid_size*grid_size*num_anchors, bbox_attrs)
-    
-    
-    #Sigmoid object confidencce
-    prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
-    
-#     prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
-    
-    
-    prediction[:,:,5: 5 + num_classes] = torch.softmax((prediction[:,:, 5 : 5 + num_classes]).clone(),dim=2)
-    
+        
     
     return prediction
 
@@ -277,10 +274,9 @@ def get_iou_mask(targets,responsible_true_pred,inp_dim,hyperparameters):
 def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
     prev=0
     counter=0
-    no_obj=[]
-    no_obj_iou=[]
     iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
     iou_type=hyperparameters['iou_type']
+    no_obj_mask=[]
     for i in mask:
         combined_fall_into_mask=fall_into_mask[prev:prev+i,:].sum(axis=0,dtype=torch.bool) 
 #         noobj=true_pred[counter,~combined_fall_into_mask,4:]
@@ -291,30 +287,12 @@ def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
         ignore_iou=bbox_iou(abs_box,targets2[:,prev:i+prev,:],iou_type,CUDA=True)
         ignore_iou_mask=(ignore_iou>iou_ignore_thresh).sum(axis=1,dtype=torch.bool)
         prev=i+prev
-
-        no_obj.append(noobj[~ignore_iou_mask])
+        no_obj_mask.append((~combined_fall_into_mask,~ignore_iou_mask))
 #         no_obj_iou.append(1-ignore_iou.max(axis=1)[0])
 #         no_obj.append(noobj)
 #         print(ignore_iou.shape)
         counter=counter+1
-    
-    
-    no_obj=torch.cat(no_obj)
-#     no_obj_iou=torch.cat(no_obj_iou).cpu().detach().numpy()
-    
-#     noobj_score=no_obj[:,0].cpu().detach().numpy()
-#     bits=entropy(no_obj[:,1:].cpu().detach().numpy(), base=2,axis=1)
-#     mask2 = np.zeros(noobj_score.shape[0], dtype=bool) ######## this code is from sklearns selectkbest it makes a mask with ones in selected features and zeros to not selected
-#     mask2[np.argsort(noobj_score*no_obj_iou/bits, kind="mergesort")[-sum(mask)*3:]] = True
-
-#     #random sampling
-#     threshold=sum(mask)/no_obj.shape[0]*100
-#     no_obj[torch.rand([no_obj.shape[0]])<threshold]
-
-    
-#     no_obj=torch.cat([no_obj[mask2][:,4],no_obj[torch.rand([no_obj.shape[0]])<threshold][:,4]])
-#     return no_obj[mask2][:,0]
-    return no_obj
+    return no_obj_mask
     
 def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
     '''
@@ -409,86 +387,76 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     iou_type=hyperparameters['iou_type']
 
     
+#     if hyperparameters['tfidf']==True:
+#         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
+#             class_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
+#             scale_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][1])
+#             x_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][2]) 
+#             y_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][3])
+#             if(hyperparameters['tfidf_col_names'][4]=='softmax'):
+#                 class_weights=torch.softmax(class_weights,dim=0)
+#                 scale_weights=torch.softmax(scale_weights,dim=0)
+#                 x_weights=torch.softmax(x_weights,dim=0)
+#                 y_weights=torch.softmax(y_weights,dim=0)
+#         else:#below code NEEDS FIXING
+#             class_weights=helper.get_precomputed_idf(hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
+#             print(class_weights)
+#             scale_weights=1
+#             x_weights=1
+#             y_weights=1
+#     else:
+#         class_weights=1
+#         scale_weights=1
+#         x_weights=1
+#         y_weights=1
+
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
-            class_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
-            scale_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][1])
-            x_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][2]) 
-            y_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][3])
-            if(hyperparameters['tfidf_col_names'][4]=='softmax'):
-                class_weights=torch.softmax(class_weights,dim=0)
-                scale_weights=torch.softmax(scale_weights,dim=0)
-                x_weights=torch.softmax(x_weights,dim=0)
-                y_weights=torch.softmax(y_weights,dim=0)
-        else:#below code NEEDS FIXING
-            class_weights=helper.get_idf(pred,mask)
-            scale_weights=class_weights
-            x_weights=class_weights
-            y_weights=class_weights
+            class_weights=helper.get_precomputed_idf(hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
+#             print(class_weights.shape)
+            scale_weights=1
+            x_weights=1
+            y_weights=1
+    if(hyperparameters['tfidf_col_names'][1]=='area'):
+        loc_weights=helper.get_location_weights(offset,mask)
     else:
-        class_weights=1
-        scale_weights=1
-        x_weights=1
-        y_weights=1
-    
+        loc_weights=None
+        
     if(iou_type==(0,0,0)):#this means normal training with mse
         pred[:,0] = torch.sigmoid(pred[:,0])
         pred[:,1]= torch.sigmoid(pred[:,1])
         gt[:,0:4]=gt[:,0:4]*inp_dim
         gt[:,0:4]=transform_groundtruth(gt,anchors,offset,strd)
+        xy_loss=nn.MSELoss(reduction=hyperparameters['reduction'])
+        xy_coord_loss=xy_loss(pred[:,0:2],gt[:,0:2])
+        wh_loss=nn.MSELoss(reduction=hyperparameters['reduction'])
+        wh_coord_loss=wh_loss(pred[:,2:4],gt[:,2:4])
     else:
-        pred=transform(pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0)).squeeze(0)
-    
-
-    if hyperparameters['reduction']=='sum':
-        if iou_type!=(0,0,0):
-            gt[:,0:4]=gt[:,0:4]*inp_dim
-            iou=bbox_iou(get_abs_coord(pred[:,0:4].unsqueeze(0)),get_abs_coord(gt[:,0:4].unsqueeze(0)),iou_type)
+        pred=transform(pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0),only_coord=True).squeeze(0)
+        gt[:,0:4]=gt[:,0:4]*inp_dim
+        iou=bbox_iou(get_abs_coord(pred[:,0:4].unsqueeze(0)),get_abs_coord(gt[:,0:4].unsqueeze(0)),iou_type)
+        if hyperparameters['reduction']=='sum':
             iou_loss=(1-iou).sum()
         else:
-            xy_loss=nn.MSELoss(reduction='none')
-    #     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
-            xy_coord_loss= (x_weights*xy_loss(pred[:,0:1],gt[:,0:1])).sum()+(y_weights*xy_loss(pred[:,1:2],gt[:,1:2])).sum()
-    #         xy_coord_loss= (xy_loss(pred[:,0:2],gt[:,0:2])).sum()
-            wh_loss=nn.MSELoss(reduction='none')
-            wh_coord_loss= (scale_weights*wh_loss(pred[:,2:4],gt[:,2:4])).sum()
-    #         wh_coord_loss= (wh_loss(pred[:,2:4],gt[:,2:4])).sum()
-    #     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
-        bce_class=nn.BCELoss(reduction='none')
-        
-        class_loss=(class_weights*bce_class(pred[:,5:],gt[:,5:])).sum()
+            iou_loss=(1-iou).mean()
+       
     
-#         bce_obj=nn.BCELoss(reduction=hyperparameters['reduction'])
-        bce_obj=csloss.FocalLoss(reduction=hyperparameters['reduction'],gamma=gamma)
-#         confidence_loss=(class_weights*bce_obj(pred[:,4],gt[:,4])).sum()
-        confidence_loss=(bce_obj(pred[:,4],gt[:,4]))
-        
-    elif hyperparameters['reduction']=='mean':
-        
-        xy_loss=nn.MSELoss(reduction='none')
-#     xy_loss=nn.BCEWithLogitsLoss(reduction='none')
-        xy_coord_loss= (x_weights*xy_loss(pred[:,0:1],gt[:,0:1])).mean()+(y_weights*xy_loss(pred[:,1:2],gt[:,1:2])).mean()
-        wh_loss=nn.MSELoss(reduction='none')
-        wh_coord_loss= (scale_weights*wh_loss(pred[:,2:4],gt[:,2:4])).mean()
-#     wh_loss=(helper.standard(gt[:,2])-helper.standard(pred[:,2]))**2 + (helper.standard(gt[:,3])-helper.standard(pred[:,3]))**2
-#     bce_class=nn.BCELoss(reduction='none')
-        focal_loss=csloss.FocalLoss(reduction='none',gamma=gamma)
-        class_loss=(class_weights*focal_loss(pred[:,5:],gt[:,5:])).mean()
+    bce_class=nn.CrossEntropyLoss(reduction=hyperparameters['reduction'],weight=class_weights)
+    class_loss=bce_class(pred[:,5:],gt[:,5:].max(axis=1)[1])
     
-        bce_obj=nn.BCELoss(reduction='none')
-        confidence_loss=(class_weights*bce_obj(pred[:,4],gt[:,4])).mean()
+    bce_obj=csloss.FocalLoss(gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
+    confidence_loss=(bce_obj(pred[:,4],gt[:,4]))
     
-    
-    bce_noobj=csloss.FocalLoss(reduction=hyperparameters['reduction'],gamma=gamma)
+    bce_noobj=csloss.FocalLoss(gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
 #     print(gt.shape[0])
-#     print('iou_loss is:',iou_loss)
+    print('iou_loss is:',iou_loss)
 #     print('xy_loss is:',xy_coord_loss)
 #     print('wh_coord_loss is:',wh_coord_loss)
-#     print('confidence_loss is:',confidence_loss)
-#     print('no_obj_conf_loss is:',no_obj_conf_loss)
-#     print('class_loss is:',class_loss)
+    print('confidence_loss is:',confidence_loss)
+    print('no_obj_conf_loss is:',no_obj_conf_loss)
+    print('class_loss is:',class_loss)
 
     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss
     
@@ -496,5 +464,4 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
         total_loss=total_loss/sum(mask)
     
     return total_loss
-
 
