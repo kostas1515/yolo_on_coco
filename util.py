@@ -232,6 +232,11 @@ def get_fall_into_mask(targets,offset,strd,inp_dim):
     #multiply by inp_dim then devide by stride to get the relative grid size coordinates, floor the result to get the corresponding cell
     target_xc=targets[:,0:1]
     target_yc=targets[:,1:2]
+    
+    #if target is on the boundary reduce it by small amount to bring it inside the grid cell
+    target_xc[target_xc==1]=target_xc[target_xc==1]-1E-5
+    target_yc[target_yc==1]=target_yc[target_yc==1]-1E-5
+    
     centered_x=torch.floor(target_xc*inp_dim/strd.squeeze())
     centered_y=torch.floor(target_yc*inp_dim/strd.squeeze())
     fall_into_mask=(centered_x==offset[:,:,0])&(centered_y==offset[:,:,1])
@@ -451,12 +456,12 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
 #     print(gt.shape[0])
-    print('iou_loss is:',iou_loss)
+#     print('iou_loss is:',iou_loss)
 #     print('xy_loss is:',xy_coord_loss)
 #     print('wh_coord_loss is:',wh_coord_loss)
-    print('confidence_loss is:',confidence_loss)
-    print('no_obj_conf_loss is:',no_obj_conf_loss)
-    print('class_loss is:',class_loss)
+#     print('confidence_loss is:',confidence_loss)
+#     print('no_obj_conf_loss is:',no_obj_conf_loss)
+#     print('class_loss is:',class_loss)
 
     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss
     
