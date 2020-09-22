@@ -1,26 +1,34 @@
 from bayes_opt import BayesianOptimization
 from bayes_opt.logger import JSONLogger
 from bayes_opt.event import Events
-import yolo_function as yolo_function
 from bayes_opt.util import load_logs
+import bayesian_pipeline as bayesian_pipeline
+import numpy as np
 
 
-pbounds = {'weight_decay': (0, 0.001),'momentum': (0.8, 1.0),'gamma':(0.0, 2.0),
-           'lcoord':(1.0,10.0),'lno_obj':(0.01,1.0),'iou_ignore_thresh':(0.2,0.7),'iou_type':(0.0,4.0)}
+pbounds = {'w': (0, 0.001),'m': (0.8, 1.0),'g':(0.0, 2.0),'a':(0.01, 0.99),
+           'lcoor':(0.0,10.0),'lno':(0.01,1.0),'iou_thresh':(0.1,0.9),'iou_type':(0.0,4.0),'inf_c':(0.0,1.0),'inf_t':(0.0,1.0)}
 
 
 
+for i in range(25):
+    optimizer = BayesianOptimization(
+        f=bayesian_pipeline.bayesian_opt,
+        pbounds=pbounds,
+        verbose=1, # verbose = 1 prints only when a maximum is observed, verbose = 0 is silent
+        random_state=i,
+    )
 
-optimizer = BayesianOptimization(
-    f=yolo_function.train_yolo,
-    pbounds=pbounds,
-    verbose=2, # verbose = 1 prints only when a maximum is observed, verbose = 0 is silent
-    random_state=39,
-)
+    optimizer.maximize(
+        init_points=20,
+        n_iter=2,
+    )
 
-optimizer.maximize(
-    init_points=10,
-    n_iter=10,
-)
+    print(optimizer.max)
 
-print(optimizer.max)
+    params=optimizer.max['params']
+
+    bayesian_pipeline.bayesian_opt(params['w'],params['m'],params['g'],params['a'],
+                                   params['lcoor'],params['lno'],params['iou_thresh'],params['iou_type'],
+                                   params['inf_c'],params['inf_t'],bayes_opt=False)
+

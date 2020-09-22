@@ -90,6 +90,7 @@ def my_collate(batch):
             pictures=torch.cat((pictures,pics),0)
         boxes=boxes+el['boxes']
         image_meta.append({'img_name':el['img_name'],'img_size':el['img_size']})
+        
     return pictures,boxes,image_meta
 
 
@@ -186,7 +187,7 @@ def get_weights(gt,mask,obj_idf,col_name):
 def convert2_abs(bboxes,shape):
         
     (h,w,c)=shape
-        
+
     bboxes[:,1]=bboxes[:,1]*w
     bboxes[:,2]=bboxes[:,2]*h
     bboxes[:,3]=bboxes[:,3]*w

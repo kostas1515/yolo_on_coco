@@ -19,7 +19,7 @@ from imgaug.augmentables.bbs import BoundingBox, BoundingBoxesOnImage
 
 class Coco(Dataset):
 
-    def __init__(self, partition,coco_version, transform=None):
+    def __init__(self, partition,coco_version,subset=1.0, transform=None):
         """
         Args:
             zip_file (string): Path to the zip file with annotations.
@@ -29,6 +29,7 @@ class Coco(Dataset):
         """
         
         self.pointers=pd.read_csv('../pointers/'+partition+coco_version+'.txt',names=['img'])
+#         self.pointers=pd.read_csv('../pointers/subset2017.txt',names=['img'])
         self.pointers['box']=self.pointers['img'].apply(lambda x: x.split('.')[0]+'.txt')
         if coco_version=='2017':
             self.my_image_path = os.path.join('../images',partition+'2017/')
@@ -36,7 +37,8 @@ class Coco(Dataset):
         elif coco_version=='2014':
             self.my_image_path = '../images'
             self.my_label_path='../labels/coco/labels'
-        
+        if subset<1:
+            self.pointers=self.pointers.sample(n=int(self.pointers.shape[0]*subset), random_state=1)
         self.transform = transform
         
 
@@ -45,14 +47,15 @@ class Coco(Dataset):
 
     def __getitem__(self, idx):
         img_path=os.path.join(self.my_image_path,self.pointers.iloc[idx, 0])
-        label_path=os.path.join(self.my_label_path,self.pointers.iloc[idx, 1])
         
+        label_path=os.path.join(self.my_label_path,self.pointers.iloc[idx, 1])
         try:
             with open(label_path) as box:
                 box=box.read()
                 box=pd.DataFrame([x.split() for x in box.rstrip('\n').split('\n')],columns=['class','xc','yc','w','h'])
         except FileNotFoundError:
-
+            print('file not found')
+            print(label_path)
             return None
         
         try:
@@ -91,7 +94,6 @@ class ResizeToTensor(object):
         
         imgs = [cv2.resize(i, (self.scale,self.scale)) for i in imgs]         #Resize to the input dimension
         imgs =  [i.transpose((2,0,1)) for i in imgs]# H x W x C -> C x H x W
-        
         imgs = [i/255.0 for i in imgs]       #Add a channel at 0 (for batch) | Normalise.
 
         imgs = [torch.from_numpy(i).float() for i in imgs]     #Convert to float
@@ -111,18 +113,19 @@ class ResizeToTensor(object):
         return sample
 
 class Augment(object):
+    #use mosaic
     
     def __init__(self,num_of_augms=1):
         self.num_of_augms=num_of_augms
         self.aug=iaa.OneOf([
             iaa.Sequential([
-                iaa.LinearContrast(alpha=(0.1, 1.9)),
-                iaa.Fliplr(0.5)
+                iaa.LinearContrast(alpha=(0.75, 1.5)),
+                iaa.Fliplr(1.0)
             ]),
             iaa.Sequential([
                 iaa.Grayscale(alpha=(0.1, 0.9)),
                 iaa.Affine(
-                translate_px={"y": (-150, 150)}
+                translate_percent={"y": (-0.1, 0.1)}
             )
             ]),
             iaa.Sequential([
@@ -130,36 +133,63 @@ class Augment(object):
                 iaa.ShearX((-10, 10))
             ]),
             iaa.Sequential([
-                iaa.GaussianBlur(sigma=(0, 0.5)),
+                iaa.GaussianBlur(sigma=(0, 1)),
                 iaa.ShearY((-10, 10))
             ]),
             iaa.Sequential([
-                iaa.Multiply((0.8, 1.2), per_channel=0.2),
-                iaa.Affine(
-                rotate=(-30, 30)
-            )
+                iaa.Multiply((0.5, 1.5), per_channel=0.3),
+                iaa.Fliplr(1.0),
+                iaa.Fliplr(1.0),
+                iaa.Fliplr(1.0)
             ]),
             iaa.Sequential([
                 iaa.HistogramEqualization(),
                 iaa.Affine(
-                translate_px={"x": (-150, 150)}
+                translate_percent={"x": (-0.15, 0.15)}
             )
             ]),
             iaa.Sequential([
-                iaa.GaussianBlur(sigma=(0, 0.5)),
+                iaa.Crop(percent=(0.1, 0.15)),
+                iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 0.05*255), per_channel=0.5),
+                iaa.Affine(
+                scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
+            )
+            ]),
+            iaa.Sequential([
+                iaa.OneOf([
+                    iaa.GaussianBlur((0, 3.0)),
+                    iaa.AverageBlur(k=(2, 7)),
+                    iaa.MedianBlur(k=(3, 11)),
+                ]),
+                iaa.Affine(
+                scale={"x": (0.9, 1.1), "y": (0.9, 1.1)},
+                translate_percent={"x": (-0.05, 0.05), "y": (-0.05, 0.05)},
+                shear=(-6, 6)
+            )
+            ]),
+             iaa.Sequential([
+                iaa.Crop(percent=(0.05, 0.15)),
+                iaa.BlendAlpha(
+                factor=(0.2, 0.8),
+                foreground=iaa.Affine(shear=(-3, 3)),
+                per_channel=True
+            )
+            ]),
+            iaa.Sequential([
+                iaa.GaussianBlur(sigma=(0, 0.9)),
                 iaa.Affine(
                 scale={"x": (0.8, 1.2), "y": (0.8, 1.2)}
             )
             ])
         ])
-        
+                        
     def __call__(self, sample):
         
-        bbox_list=sample["boxes"]
-        img_list=sample['images']
+        bbox_list=[]
+        img_list=[]
 
-        temp_img_=img_list[0]
-        temp_b_=bbox_list[0]
+        temp_img_=sample["images"][0]
+        temp_b_=sample["boxes"][0]
         
         for i in range(self.num_of_augms):
             bboxes=np.array([])

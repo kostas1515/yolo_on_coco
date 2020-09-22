@@ -389,8 +389,9 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     lcoord=hyperparameters['lcoord']
     lno_obj=hyperparameters['lno_obj']
     gamma=hyperparameters['gamma']
+    alpha=hyperparameters['alpha']
     iou_type=hyperparameters['iou_type']
-
+    
     
 #     if hyperparameters['tfidf']==True:
 #         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
@@ -418,10 +419,18 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
             class_weights=helper.get_precomputed_idf(hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
-#             print(class_weights.shape)
+            if(hyperparameters['tfidf_col_names'][4]=='softmax'):
+                class_weights=torch.softmax(class_weights,dim=0)
+            elif(hyperparameters['tfidf_col_names'][4]=='minmax'):
+                class_weights_std= (class_weights - class_weights.min(axis=0)[0]) / (class_weights.max(axis=0)[0] - class_weights.min(axis=0)[0])
+                class_weights = class_weights_std +0.1
+#             print(class_weights)
             scale_weights=1
             x_weights=1
             y_weights=1
+    else:
+        class_weights=None
+        
     if(hyperparameters['tfidf_col_names'][1]=='area'):
         loc_weights=helper.get_location_weights(offset,mask)
     else:
@@ -448,11 +457,12 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     
     bce_class=nn.CrossEntropyLoss(reduction=hyperparameters['reduction'],weight=class_weights)
     class_loss=bce_class(pred[:,5:],gt[:,5:].max(axis=1)[1])
+
     
-    bce_obj=csloss.FocalLoss(gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
+    bce_obj=csloss.FocalLoss(alpha=alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
     confidence_loss=(bce_obj(pred[:,4],gt[:,4]))
     
-    bce_noobj=csloss.FocalLoss(gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
+    bce_noobj=csloss.FocalLoss(alpha=1-alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
 #     print(gt.shape[0])
