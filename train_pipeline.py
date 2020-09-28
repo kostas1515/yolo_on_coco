@@ -27,8 +27,8 @@ hyperparameters={'lr': 0.0001,
                  'weight_decay': 0.0005,
                  'momentum': 0.9, 
                  'optimizer': 'sgd', 
-                 'alpha': 0.9, 
-                 'gamma': 0, 
+                 'alpha': 0.6, 
+                 'gamma': 1.3, 
                  'lcoord': 5,
                  'lno_obj': 0.5,
                  'iou_type': (1, 0, 0),
@@ -70,70 +70,69 @@ inp_dim=net.inp_dim
 when loading weights from dataparallel model then, you first need to instatiate the dataparallel model 
 if you start fresh then first model.load_weights and then make it parallel
 '''
-if (hyperparameters['pretrained']==True):
-    try:
-        PATH = '../pth/'+hyperparameters['path']+'/'
-        checkpoint = torch.load(PATH+hyperparameters['path']+'.tar')
-            # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
-        net.to(device)
+try:
+    PATH = '../pth/'+hyperparameters['path']+'/'
+    checkpoint = torch.load(PATH+hyperparameters['path']+'.tar')
+                    # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
+    net.to(device)
 
-        if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
-            model = nn.DataParallel(net)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            model.to(device)
-        else:
-            model=net
-            model.load_state_dict(checkpoint['model_state_dict'])
-            model.to(device)
-                
-        if hyperparameters['optimizer']=='sgd':
-            optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
-        elif hyperparameters['optimizer']=='adam':
-            optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-                
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        hyperparameters['resume_from']=checkpoint['epoch']
-        
-    except FileNotFoundError:
-        print("WARNING FILE NOT FOUND INSTEAD USING OFFICIAL PRETRAINED")
-        net.load_weights("../yolov3.weights")
-        
-        net.to(device)
-        if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
-            model = nn.DataParallel(net)
-            model.to(device)
-        else:
-            model=net
-                
-        if hyperparameters['optimizer']=='sgd':
-            optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
-        elif hyperparameters['optimizer']=='adam':
-            optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-        hyperparameters['resume_from']=0                     
-else:
-    try:
-        PATH = '../pth/'+hyperparameters['path']+'/'
-        os.mkdir(PATH)
-    except FileExistsError:
-        print('path already exist')
-        
     if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
         model = nn.DataParallel(net)
+        model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
     else:
         model=net
+        model.load_state_dict(checkpoint['model_state_dict'])
         model.to(device)
-        
+
     if hyperparameters['optimizer']=='sgd':
         optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
     elif hyperparameters['optimizer']=='adam':
         optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-    hyperparameters['resume_from']=0
+
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    hyperparameters['resume_from']=checkpoint['epoch']
+
+except FileNotFoundError:
+    if (hyperparameters['pretrained']==True):
+        print("WARNING FILE NOT FOUND INSTEAD USING OFFICIAL PRETRAINED")
+        net.load_weights("../yolov3.weights")
+
+        net.to(device)
+        if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
+            model = nn.DataParallel(net)
+            model.to(device)
+        else:
+            model=net
+
+        if hyperparameters['optimizer']=='sgd':
+            optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
+        elif hyperparameters['optimizer']=='adam':
+            optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
+        hyperparameters['resume_from']=0
+    else:
+        try:
+            PATH = '../pth/'+hyperparameters['path']+'/'
+            os.mkdir(PATH)
+        except FileExistsError:
+            pass
+#                     print('path already exist')
+
+        if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
+            model = nn.DataParallel(net)
+            model.to(device)
+        else:
+            model=net
+            model.to(device)
+
+        if hyperparameters['optimizer']=='sgd':
+            optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
+        elif hyperparameters['optimizer']=='adam':
+            optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
+        hyperparameters['resume_from']=0
     
     
-if(mode['save_summary']==True):
-    writer = SummaryWriter('../results/'+hyperparameters['path'])
-elif(mode['show_temp_summary']==True):
+if(mode['show_temp_summary']==True):
     writer = SummaryWriter('../results/test_vis/')
 
 
@@ -147,24 +146,39 @@ dataset_len=(len(train_dataset))
 batch_size=hyperparameters['batch_size']
 mAP_best=0
 
+scheduler=optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience=5)
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size,
-                            shuffle=True,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
+                            shuffle=True,collate_fn=helper.collate_fn, num_workers=hyperparameters['workers'])
 
 for i in range(hyperparameters['epochs']):
-    mAP=yolo_function.train_one_epoch(model,optimizer,train_dataloader,hyperparameters,mode)
-
+    outcome=yolo_function.train_one_epoch(model,optimizer,train_dataloader,hyperparameters,mode)
+    mAP=test.evaluate(model, device,coco_version,confidence=hyperparameters['inf_confidence'],iou_threshold=hyperparameters['inf_iou_threshold'])
+    scheduler.step(mAP)
     if(mode['save_summary']==True):
-        checkpoint = torch.load(PATH+hyperparameters['path']+'.tar')
+        writer = SummaryWriter('../results/'+hyperparameters['path'])
+        
+        writer.add_scalar('Loss/train', outcome['avg_loss'], hyperparameters['resume_from'])
+        writer.add_scalar('AIoU/train', outcome['avg_iou'], hyperparameters['resume_from'])
+        writer.add_scalar('PConf/train', outcome['avg_conf'], hyperparameters['resume_from'])
+        writer.add_scalar('NConf/train', outcome['avg_no_conf'], hyperparameters['resume_from'])
+        writer.add_scalar('PClass/train', outcome['avg_pos'], hyperparameters['resume_from'])
+        writer.add_scalar('NClass/train', outcome['avg_neg'], hyperparameters['resume_from'])
+        
+        writer.add_scalar('mAP/valid', mAP, hyperparameters['resume_from'])
 
-        writer.add_scalar('Loss/train', checkpoint['avg_loss'], checkpoint['epoch'])
-        writer.add_scalar('AIoU/train', checkpoint['avg_iou'], checkpoint['epoch'])
-        writer.add_scalar('PConf/train', checkpoint['avg_conf'], checkpoint['epoch'])
-        writer.add_scalar('NConf/train', checkpoint['avg_no_conf'], checkpoint['epoch'])
-        writer.add_scalar('PClass/train', checkpoint['avg_pos'], checkpoint['epoch'])
-        writer.add_scalar('NClass/train', checkpoint['avg_neg'], checkpoint['epoch'])
-        writer.add_scalar('mAP/valid', mAP, checkpoint['epoch'])
+    torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'avg_loss': outcome['total_loss'],
+            'avg_iou': outcome['avg_iou'],
+            'avg_pos': outcome['avg_pos'],
+            'avg_neg':outcome['avg_neg'],
+            'avg_conf': outcome['avg_conf'],
+            'avg_no_conf': outcome['avg_no_conf'],
+            'epoch':hyperparameters['resume_from']+1,
+            'mAP': mAP
+            }, PATH+hyperparameters['path']+'.tar')
 
-        hyperparameters['resume_from']=checkpoint['epoch']+1
         
     if mAP>mAP_best:
         torch.save(checkpoint, PATH+hyperparameters['path']+'_best.tar')

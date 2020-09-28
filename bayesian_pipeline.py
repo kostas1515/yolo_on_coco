@@ -16,10 +16,11 @@ import torch.autograd
 import helper as helper
 from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
+import test
 import yolo_function as yolo_function
 
 
-def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=True):
+def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=True):
     
     iou_type=int(round(iou_type))
     if(iou_type)==0:
@@ -31,7 +32,7 @@ def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=Tru
     else:
         iou_type=(0,0,1) 
     
-    hyperparameters={'lr': 0.001, 
+    hyperparameters={'lr': lr, 
                      'epochs': 1,
                      'resume_from':0,
                      'coco_version': '2014', #can be either '2014' or '2017'
@@ -52,8 +53,8 @@ def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=Tru
                      'tfidf_col_names': ['img_freq', 'none', 'none', 'none', 'no_softmax'],
                      'augment': 1, 
                      'workers': 4,
-                     'pretrained':False,
-                     'path': 'bayes_opt1', 
+                     'pretrained':True,
+                     'path': 'bayes_opt', 
                      'reduction': 'sum'}
 
     mode={'bayes_opt':bayes_opt,
@@ -102,7 +103,7 @@ def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=Tru
         elif hyperparameters['optimizer']=='adam':
             optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
 
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+#         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         hyperparameters['resume_from']=checkpoint['epoch']
 
     except FileNotFoundError:
@@ -147,16 +148,18 @@ def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=Tru
             
 
     if bayes_opt==True:
-        subset=0.01
+        tr_subset=0.01
+        ts_subset=0.1
     else:
-        subset=1
+        tr_subset=1
+        ts_subset=1
     if(mode['save_summary']==True):
         writer = SummaryWriter('../results/'+hyperparameters['path'])
    
 
     
     if hyperparameters['augment']>0:
-        train_dataset=Coco(partition='train',coco_version=coco_version,subset=subset,
+        train_dataset=Coco(partition='train',coco_version=coco_version,subset=tr_subset,
                            transform=transforms.Compose([Augment(hyperparameters['augment']),ResizeToTensor(inp_dim)]))
     else:
         train_dataset=Coco(partition='train',coco_version=coco_version,subset=subset,transform=transforms.Compose([ResizeToTensor(inp_dim)]))
@@ -165,24 +168,43 @@ def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=Tru
     batch_size=hyperparameters['batch_size']
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size,
-                                shuffle=True,collate_fn=helper.my_collate, num_workers=hyperparameters['workers'])
+                                shuffle=True,collate_fn=helper.collate_fn, num_workers=hyperparameters['workers'])
 
     for i in range(hyperparameters['epochs']):
-        mAP=yolo_function.train_one_epoch(model,optimizer,train_dataloader,hyperparameters,mode)
-
+        outcome=yolo_function.train_one_epoch(model,optimizer,train_dataloader,hyperparameters,mode)
+        
+        if outcome['broken']==1:
+            return 0
+        else:
+            mAP=test.evaluate(model, device,coco_version,confidence=hyperparameters['inf_confidence'],iou_threshold=hyperparameters['inf_iou_threshold'],subset=ts_subset)
+            if(len(mAP)==0):
+                mAP=0
+            else:
+                mAP=mAP[0]
         if(mode['save_summary']==True):
-            checkpoint = torch.load(PATH+hyperparameters['path']+'.tar')
-
-            writer.add_scalar('Loss/train', checkpoint['avg_loss'], checkpoint['epoch'])
-            writer.add_scalar('AIoU/train', checkpoint['avg_iou'], checkpoint['epoch'])
-            writer.add_scalar('PConf/train', checkpoint['avg_conf'], checkpoint['epoch'])
-            writer.add_scalar('NConf/train', checkpoint['avg_no_conf'], checkpoint['epoch'])
-            writer.add_scalar('PClass/train', checkpoint['avg_pos'], checkpoint['epoch'])
-            writer.add_scalar('NClass/train', checkpoint['avg_neg'], checkpoint['epoch'])
-            writer.add_scalar('mAP/valid', mAP, checkpoint['epoch'])
+            
+            writer.add_scalar('Loss/train', outcome['avg_loss'], hyperparameters['resume_from'])
+            writer.add_scalar('AIoU/train', outcome['avg_iou'], hyperparameters['resume_from'])
+            writer.add_scalar('PConf/train', outcome['avg_conf'], hyperparameters['resume_from'])
+            writer.add_scalar('NConf/train', outcome['avg_no_conf'], hyperparameters['resume_from'])
+            writer.add_scalar('PClass/train', outcome['avg_pos'], hyperparameters['resume_from'])
+            writer.add_scalar('NClass/train', outcome['avg_neg'], hyperparameters['resume_from'])
+            writer.add_scalar('mAP/valid', mAP, hyperparameters['resume_from'])
+            
+        if(mode['bayes_opt']==False):
+            
+            torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'avg_loss': outcome['total_loss'],
+            'avg_iou': outcome['avg_iou'],
+            'avg_pos': outcome['avg_pos'],
+            'avg_neg':outcome['avg_neg'],
+            'avg_conf': outcome['avg_conf'],
+            'avg_no_conf': outcome['avg_no_conf'],
+            'epoch':hyperparameters['resume_from']+1
+            }, PATH+hyperparameters['path']+'.tar')
 
 #             hyperparameters['resume_from']=checkpoint['epoch']+1
                 
     return mAP
-
-    

@@ -9,63 +9,7 @@ import numba
 from numba import jit
 
 
-def collapse_boxes(boxes,pw_ph,cx_cy,stride):
-    '''
-    This function takes a list of bbs the predefined anchors offset and stride and 
-    creates parallel tensors of bounding boxes and their respective anchors offsets and strides.
-    '''
-    write=0
-    mask=[]
-    for box in boxes:
-        if write==0:
-            targets=box
-            anchors=torch.stack([pw_ph for p in range(box.shape[0])], dim=0)
-            offset=torch.stack([cx_cy for p in range(box.shape[0])], dim=0)
-            strd=torch.stack([stride for p in range(box.shape[0])], dim=0)
-            write=1
-        else:
-            targets=torch.cat((targets,box),0)
-            
-            anchors=torch.cat((anchors,torch.stack([pw_ph for p in range(box.shape[0])], dim=0)),0)
-            offset=torch.cat((offset,torch.stack([cx_cy for p in range(box.shape[0])], dim=0)),0)
-            strd=torch.cat((strd,torch.stack([stride for p in range(box.shape[0])], dim=0)),0)
-        mask.append(box.shape[0])
-    return targets,anchors.squeeze(1),offset.squeeze(1),strd.squeeze(1),mask
 
-def expand_predictions(predictions,mask):
-    k=0
-    write=0
-    for i in mask:
-        if write==0:
-            new=torch.stack([predictions[k,:,:] for p in range(i)], dim=0)
-            write=1
-        else:
-            new=torch.cat((new,torch.stack([predictions[k,:,:] for p in range(i)], dim=0)),0)
-        k=k+1
-    
-    return new
-
-def uncollapse(predictions,mask):
-    k=0
-    write=0
-    for i in mask:
-        if write==0:
-            new=torch.stack([predictions[k,:,:]], dim=0)
-            write=1
-        else:
-            new=torch.cat((new,torch.stack([predictions[k,:,:]], dim=0)),0)
-        k=k+i
-    
-    return new
-
-def get_responsible_boxes(true_pred,fall_into_mask,mask):  
-    responsible_boxes=torch.empty([sum(mask),9,true_pred.shape[2]],device='cuda')
-    counter=0
-    for i in mask:
-        for j in range(i):
-            responsible_boxes[k,:,:]=true_pred[counter,fall_into_mask[k]]
-            k=k+1
-        counter=counter+1
 
 def coco80_to_coco91_class(label):
     x= [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
@@ -73,25 +17,6 @@ def coco80_to_coco91_class(label):
          64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
     
     return x[int(label)]
-
-def my_collate(batch):
-    write=0
-    boxes=[]
-    image_meta=[]
-    pictures=[]
-    for el in filter(None,batch):
-        if write==0:
-            pictures=[img.unsqueeze(-4) for img in el['images']]
-            pictures=torch.cat(pictures, dim=0)
-            write=1
-        else:
-            pics=[img.unsqueeze(-4) for img in el['images']]
-            pics=torch.cat(pics, dim=0)
-            pictures=torch.cat((pictures,pics),0)
-        boxes=boxes+el['boxes']
-        image_meta.append({'img_name':el['img_name'],'img_size':el['img_size']})
-        
-    return pictures,boxes,image_meta
 
 
 def standard(tensor):
@@ -180,9 +105,70 @@ def get_weights(gt,mask,obj_idf,col_name):
     weights=torch.abs(dset_var-gt_var)
     
     return weights.unsqueeze(1)
+
+def dic2tensor(targets,key):
+    
+    tensor=torch.cat([t[key] for t in targets],dim=0)
+    
+    return tensor
+
+def get_progress_stats(true_pred,no_obj,iou_list,targets):
+    '''
+    this function takes the Tranformed true prediction and the IoU list between the true prediction and the Gt boxes.
+    Based on the IoU list it will calculate the mean IoU, the mean Positive Classification,  the mean negative Classification,
+    the mean Positive objectness and the mean negative objectness.
+    INPUTS: True_pred = Tensor:[N,BBs,4+1+C]
+            no_obj_conf= Tensor [K]
+            Targets = List of DICTs(N elements-> Key:Tenor[M,x]) , where M is the number of objects for that N, x depends on key.
+            IoU List= List(N elements->Tensors[M,BBs])
+    Outputs:DICT:{floats: avg_pos_conf, avg_neg_conf, avg_pos_class, avg_neg_class, avg_iou}  
+    '''
+
+    resp_true_pred=[]
+    best_iou=[]
+    no_obj2=no_obj.clone().detach()
+    labels=dic2tensor(targets,'labels')
+    
+    for i in range(len(iou_list)):
+        best_iou_positions=iou_list[i].max(axis=1)[1]
+        best_iou.append(iou_list[i].max(axis=1)[0])
+        
+        resp_true_pred.append(true_pred[i,:,:][best_iou_positions])
+        
+    resp_true_pred=torch.cat(resp_true_pred,dim=0)
+    best_iou=torch.cat(best_iou,dim=0)
+    
+    
+    nb_digits = resp_true_pred.shape[1]-5 # get the number of CLasses
+    n_obj=resp_true_pred.shape[0]
+    y = labels.view(-1,1)
+    y_onehot = torch.BoolTensor(n_obj, nb_digits)
+    y_onehot.zero_()
+    y_onehot.scatter_(1, y, 1)
+    
+    pos_class=resp_true_pred[:,5:][y_onehot].mean().item()
+    neg_class=resp_true_pred[:,5:][~y_onehot].mean().item()
+    
+    pos_conf=resp_true_pred[:,4].mean().item()
+    avg_iou=best_iou.mean().item()
+    
+    neg_conf=torch.sigmoid(no_obj2).mean().item()
+    
+    return  {'iou':avg_iou,
+             'pos_conf':pos_conf,
+             'neg_conf':neg_conf,
+             'pos_class':pos_class,
+             'neg_class':neg_class}
     
 
 
+def collate_fn(batch):
+    pictures=[i[0] for i in batch]
+    pictures=torch.cat(pictures, dim=0)
+    
+    targets=[i[1] for i in batch]
+        
+    return pictures,targets
 
 def convert2_abs(bboxes,shape):
         
@@ -199,39 +185,48 @@ def convert2_abs(bboxes,shape):
     return bboxes
 
 
-def convert2_abs_xywh(bboxes,shape,inp_dim):
+def convert2_abs_xyxy(bboxes,shape,inp_dim=1):
         
     (h,w,c)=shape
     h=h/inp_dim
     w=w/inp_dim
-        
-    bboxes[:,0]=bboxes[:,0]*w
-    bboxes[:,1]=bboxes[:,1]*h
-    bboxes[:,2]=bboxes[:,2]*w
-    bboxes[:,3]=bboxes[:,3]*h
-    bboxes[:,0]=bboxes[:,0]-bboxes[:,2]/2
-    bboxes[:,1]=bboxes[:,1]-bboxes[:,3]/2
-        
-    return bboxes
+    
+    
+    xmin=bboxes[:,0]*w
+    ymin=bboxes[:,1]*h
+    width=bboxes[:,2]*w
+    height=bboxes[:,3]*h
+    xmin=xmin-width/2
+    ymin=ymin-height/2
+    xmax=xmin+width
+    ymax=ymin+height
+    
+    if (type(bboxes) is torch.Tensor):
+        return torch.stack((xmin, ymin, xmax, ymax)).T
+    else:
+        return np.stack((xmin, ymin, xmax, ymax)).T
 
 
 
-def convert2_rel(bboxes,shape):
+def convert2_rel_xcycwh(bboxes,shape):
         
     (h,w,c)=shape
+    
+    xmin=bboxes[:,0]/w
+    ymin=bboxes[:,1]/h
+    xmax=bboxes[:,2]/w
+    ymax=bboxes[:,3]/h
         
-    bboxes[:,1]=bboxes[:,1]/w
-    bboxes[:,2]=bboxes[:,2]/h
-    bboxes[:,3]=bboxes[:,3]/w
-    bboxes[:,4]=bboxes[:,4]/h
-        
-    bboxes[:,1] = (bboxes[:,3]- bboxes[:,1])/2 +bboxes[:,1]
-    bboxes[:,2] = (bboxes[:,4]- bboxes[:,2])/2 +bboxes[:,2]
+    xc = (xmax- xmin)/2 +xmin
+    yc = (ymax- ymin)/2 +ymin
 
-    bboxes[:,3] = 2*(bboxes[:,3]- bboxes[:,1])
-    bboxes[:,4] = 2*(bboxes[:,4]- bboxes[:,2])
-        
-    return bboxes
+    width = (xmax- xmin)
+    height = (ymax- ymin)
+    
+    if (type(bboxes) is torch.Tensor):
+        return torch.stack((xc, yc, width, height)).T
+    else:
+        return np.stack((xc, yc, width, height)).T
         
 
 def write_pred(imgname,pred_final,inp_dim,max_detections,coco_version):

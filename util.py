@@ -34,7 +34,7 @@ def transform(prediction,anchors,x_y_offset,stride,CUDA = True,only_coord=False)
     #Sigmoid object confidencce
         prediction[:,:,4] = torch.sigmoid(prediction[:,:,4])
 #         prediction[:,:,5: 5 + num_classes] = torch.sigmoid(prediction[:,:, 5 : 5 + num_classes])
-        prediction[:,:,5:] = torch.softmax((prediction[:,:, 5 :]).clone(),dim=2)
+        prediction[:,:,5:] = torch.softmax((prediction[:,:, 5 :]),dim=2)
     
     return prediction
 
@@ -102,8 +102,8 @@ def get_utillities(stride,inp_dim, anchors, num_classes):
 
 
 
-###by ultranalytics
-###https://github.com/ultralytics/yolov3/blob/master/utils/utils.py
+##by ultranalytics
+##https://github.com/ultralytics/yolov3/blob/master/utils/utils.py
 
 def bbox_iou(box1, box2,iou_type,CUDA=True):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
@@ -148,6 +148,73 @@ def bbox_iou(box1, box2,iou_type,CUDA=True):
 
     return iou
 
+
+def get_iou_list(true_pred, targets,hyperparameters,inp_dim):
+    '''
+    Inputs: True_predictions:tensor[M,B,4+1+C], targets:List(Dict{boxes:tensor[N,4]}),hyperparameters['iou_type'], inp_dim : int num
+    Outputs: List[M elements:tensor[N,B] iou_value of N->Bs]
+    '''
+    xyxy_true_pred=get_abs_coord(true_pred)
+    xyxy_true_pred=xyxy_true_pred.transpose(0,1)
+    iou_type=hyperparameters['iou_type']
+#     iou_list=[]
+#     for i in range(len(targets)):
+#         gt_boxes=targets[i]['boxes']
+#         gt_boxes=util.get_abs_coord(gt_boxes*inp_dim)
+#         iou=bbox_iou(gt_boxes.unsqueeze(1), xyxy_true_pred[i,:,:].unsqueeze(0),iou_type).max(axis=1)
+    
+    iou_list=[bbox_iou(get_abs_coord(targets[i]['boxes']*inp_dim).unsqueeze(1), xyxy_true_pred[i,:,:].unsqueeze(0),iou_type) for i in range(len(targets))]
+    
+    return iou_list
+
+
+def build_tensors(out,iou_list,pw_ph,cx_cy,stride,hyperparameters):
+    resp_raw_pred=[]
+    resp_cx_cy=[]
+    resp_pw_ph=[]
+    resp_stride=[]
+    no_obj=[]
+    w_d={}
+    iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
+    
+    for i in range(len(iou_list)):
+        best_iou_positions=iou_list[i].max(axis=1)[1]
+        
+        resp_raw_pred.append(out[i,:,:][best_iou_positions])
+        resp_cx_cy.append(cx_cy[0,:,:][best_iou_positions])
+        resp_pw_ph.append(pw_ph[0,:,:][best_iou_positions])
+        resp_stride.append(stride[0,:,:][best_iou_positions])
+        no_obj_mask=(iou_list[i]<iou_ignore_thresh).prod(axis=0)
+        no_obj_mask[best_iou_positions]=0
+        no_obj.append(out[i,no_obj_mask==1,4])
+
+    resp_raw_pred=torch.cat(resp_raw_pred,dim=0)
+    resp_cx_cy=torch.cat(resp_cx_cy,dim=0)
+    resp_pw_ph=torch.cat(resp_pw_ph,dim=0)
+    resp_stride=torch.cat(resp_stride,dim=0)
+    no_obj=torch.cat(no_obj,dim=0)
+    
+    
+    if (False):
+        true_pred=torch.sigmoid(out[:,:,4:5])
+        min_dim=int(cx_cy.max().item()+1)//4
+        tt=[]
+        dd=[]
+        for j in range(len(iou_list)):
+            distribution=(iou_list[j].max(axis=0))[0]
+            distribution[distribution<0]=0
+            for i in range(3):
+                slce=min_dim*(2**i)
+
+                ind=slce*slce*3
+                prev=0
+                tt.append(true_pred[j,prev:prev+ind,0].reshape(3,slce,slce).cuda())
+                dd.append(distribution[prev:prev+ind].reshape(3,slce,slce).cuda())
+                prev=ind
+        w_d={'dd':dd,'tt':tt}
+
+    return resp_raw_pred,resp_cx_cy,resp_pw_ph,resp_stride,no_obj
+
     
 def get_abs_coord(box):
     # yolo predicts center coordinates
@@ -181,22 +248,6 @@ def xyxy_to_xywh(box):
     
     return torch.stack((xc, yc, w, h)).T
 
-def same_picture_mask(responsible_mask,mask):
-    '''
-    mask is a batc list containing the number of objects per image
-    a single image can contain many objects, so we must create a mask to 
-    ignore the infuence of other targets into the no-oobj mask
-    '''
-    k=0
-    for i,count in enumerate(mask):
-        same_image_mask=False
-        for obj in range(count):
-            same_image_mask=same_image_mask+responsible_mask[:,k+obj]
-        for obj in range(count):
-            responsible_mask[:,k+obj]=same_image_mask
-        k=k+count
-    return responsible_mask
-
 def transpose_target(box):
     
     if torch.cuda.is_available():
@@ -209,144 +260,7 @@ def transpose_target(box):
     
     return torch.stack((xc, yc, w, h)).T
 
-def correct_iou_mask(iou_mask,fall_into_mask):
-    ''' this function corrects the iou when, iou max =0 
-    in that case for that object it decides that all responsible bboxes (9)
-    should be considered for optimisation
-    it also corrects the mask list, so it will have same number of objects
-    le_mask has the true in the index of max, aka where iou.max=0
-    '''
-    le_mask=(iou_mask.sum(axis=0)==iou_mask.sum(axis=0).max())
-    s=fall_into_mask[le_mask,:].shape
-    a=torch.randint(0, 9, (1,))
-    indices=((fall_into_mask[le_mask,:]==True).nonzero())
-    indices=indices[:,1].reshape(9,s[0])
-    indices=indices[a.item(),:].unsqueeze(0)
-    array=torch.arange(s[1])
-    array=array.repeat(s[0],1).T.cuda()
-    one_hot_target = (indices == array)
-    iou_mask[:,le_mask]=one_hot_target
-    return iou_mask
-    
-def get_fall_into_mask(targets,offset,strd,inp_dim):
-    #multiply by inp_dim then devide by stride to get the relative grid size coordinates, floor the result to get the corresponding cell
-    target_xc=targets[:,0:1]
-    target_yc=targets[:,1:2]
-    
-    #if target is on the boundary reduce it by small amount to bring it inside the grid cell
-    target_xc[target_xc==1]=target_xc[target_xc==1]-1E-5
-    target_yc[target_yc==1]=target_yc[target_yc==1]-1E-5
-    
-    centered_x=torch.floor(target_xc*inp_dim/strd.squeeze())
-    centered_y=torch.floor(target_yc*inp_dim/strd.squeeze())
-    fall_into_mask=(centered_x==offset[:,:,0])&(centered_y==offset[:,:,1])
-    
-    return fall_into_mask
 
-def build_tensors(raw_pred,true_pred,anchors,offset,stride,fall_into_mask,mask):
-    k=0
-    counter=0
-    temp_shape=raw_pred.shape[2]
-    responsible_raw_pred=torch.empty([sum(mask),9,temp_shape],device='cuda')
-    responsible_true_pred=torch.empty([sum(mask),9,temp_shape],device='cuda')
-    for i in mask:
-        for j in range(i):
-            responsible_raw_pred[k,:,:]=raw_pred[counter,fall_into_mask[k]]
-            responsible_true_pred[k,:,:]=true_pred[counter,fall_into_mask[k]]
-            k=k+1
-        counter=counter+1
-    anchors=anchors[fall_into_mask].reshape(sum(mask),9,anchors.shape[2])
-    offset=offset[fall_into_mask].reshape(sum(mask),9,offset.shape[2])
-    stride=stride[fall_into_mask].reshape(sum(mask),9,stride.shape[2])
-    return responsible_raw_pred,responsible_true_pred,anchors,offset,stride
-
-def get_iou_mask(targets,responsible_true_pred,inp_dim,hyperparameters):
-    
-    iou_type=hyperparameters['iou_type']
-    
-    targets2=get_abs_coord(targets[:,:4]*inp_dim).unsqueeze(0)#inplace operations DANGER
-    new_pred=get_abs_coord(responsible_true_pred)
-    iou=bbox_iou(new_pred,targets2,iou_type,CUDA=True)
-    iou_mask=iou.T==(iou.T.max(dim=1)[0].unsqueeze(1))
-    
-    iou_max,iou_max_index=(iou_mask.sum(axis=1).max(axis=0))
-    while iou_max>1:
-        iou_mask[iou_max_index][torch.randint(0,9,[1])]=False
-        iou_mask[iou_max_index]=~iou_mask[iou_max_index]
-        iou_max,iou_max_index=(iou_mask.sum(axis=1).max(axis=0))
-    return iou,iou_mask
-
-def get_noobj(true_pred,targets,fall_into_mask,mask,hyperparameters,inp_dim):
-    prev=0
-    counter=0
-    iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
-    iou_type=hyperparameters['iou_type']
-    no_obj_mask=[]
-    for i in mask:
-        combined_fall_into_mask=fall_into_mask[prev:prev+i,:].sum(axis=0,dtype=torch.bool) 
-#         noobj=true_pred[counter,~combined_fall_into_mask,4:]
-        noobj=true_pred[counter,~combined_fall_into_mask,4]
-        abs_box=get_abs_coord(true_pred[counter,~combined_fall_into_mask,:4])
-        abs_box=abs_box.unsqueeze(1)
-        targets2=get_abs_coord(targets[:,:4]*inp_dim).unsqueeze(0)
-        ignore_iou=bbox_iou(abs_box,targets2[:,prev:i+prev,:],iou_type,CUDA=True)
-        ignore_iou_mask=(ignore_iou>iou_ignore_thresh).sum(axis=1,dtype=torch.bool)
-        prev=i+prev
-        no_obj_mask.append((~combined_fall_into_mask,~ignore_iou_mask))
-#         no_obj_iou.append(1-ignore_iou.max(axis=1)[0])
-#         no_obj.append(noobj)
-#         print(ignore_iou.shape)
-        counter=counter+1
-    return no_obj_mask
-    
-def get_responsible_masks(transformed_output,targets,offset,strd,mask,inp_dim,hyperparameters):
-    '''
-    this function takes the transformed_output and
-    the target box in respect to the resized image size
-    and returns a mask which can be applied to select the 
-    best raw input,anchors and cx_cy_offset
-    and the noobj_mask for the negatives
-    targets is a list
-    '''
-    #first transpose the centered normalised target coords
-    ignore_threshold=hyperparameters['iou_ignore_thresh']
-    iou_type=hyperparameters['iou_type']
-    
-    centered_target=transpose_target(targets)[:,:,0:2]
-    #multiply by inp_dim then devide by stride to get the relative grid size coordinates, floor the result to get the corresponding cell
-    centered_target=torch.floor(centered_target*inp_dim/strd)
-    
-    #create a mask to find where the gt falls into which gridcell in the grid coordinate system
-    fall_into_mask=centered_target==offset
-    fall_into_mask=fall_into_mask[:,:,0]&fall_into_mask[:,:,1]
-#     fall_into_mask= ~fall_into_mask
-    #create a copy of the transformed output
-    best_bboxes=transformed_output.clone()
-    #apply reverse mask to copy in order to zero all other bbox locations
-    best_bboxes[~fall_into_mask]=0   
-    #transform the copy to xmin,xmax,ymin,ymax
-    best_responsible_coord=get_abs_coord(best_bboxes)
-    targets=transpose_target(get_abs_coord(targets))*inp_dim
-    #calculate best iou and mask
-    responsible_iou=bbox_iou(best_responsible_coord,targets,iou_type,CUDA=True)
-    responsible_iou[responsible_iou.ne(responsible_iou)] = 0
-    responsible_mask=responsible_iou.max(dim=0)[0] == responsible_iou
-    
-    if(responsible_mask.sum()>sum(mask)):
-        responsible_mask=correct_iou_mask(responsible_mask,fall_into_mask)
-        
-    abs_coord=get_abs_coord(transformed_output)
-    iou=bbox_iou(abs_coord,targets,iou_type,CUDA=True)
-    iou[iou.ne(iou)] = 0
-    ignore_mask=ignore_threshold<=iou
-    noobj_mask=~same_picture_mask(responsible_mask.clone()|ignore_mask,mask)
-#     print(targets)
-#     print(abs_coord.shape)
-#     print(noobj_mask.shape)
-#     print(noobj_mask.sum(dim=0))
-#     print(abs_coord[noobj_mask].shape)
-    
-    return responsible_mask,noobj_mask
 
     
 def transform_groundtruth(target,anchors,cx_cy,strd):
@@ -363,7 +277,10 @@ def transform_groundtruth(target,anchors,cx_cy,strd):
     
     return target[:,0:4]
 
-def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters):
+
+
+
+def yolo_loss(pred,targets,noobj_box,anchors,offset,strd,inp_dim,hyperparameters):
     '''
     the targets correspon to single image,
     multiple targets can appear in the same image
@@ -371,13 +288,12 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     output should have the size [bboxes,(tx,ty,tw.th,Confidence,class_i)]
     inp_dim is the widht and height of the image specified in yolov3.cfg
     '''
-
+    gt_boxes=helper.dic2tensor(targets,'boxes').cuda()
+    gt_labels=helper.dic2tensor(targets,'labels').cuda()
     #box size has to be torch.Size([1, grid*grid*anchors, 6])
 #     box0=output[:,:,:].squeeze(-3)# this removes the first dimension, maybe will have to change
     
     #box0[box0.ne(box0)] = 0 # this substitute all nan with 0
-    xy_loss=0
-    wh_loss=0
     iou_loss=0
     xy_coord_loss=0
     wh_coord_loss=0
@@ -392,29 +308,6 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     alpha=hyperparameters['alpha']
     iou_type=hyperparameters['iou_type']
     
-    
-#     if hyperparameters['tfidf']==True:
-#         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
-#             class_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
-#             scale_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][1])
-#             x_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][2]) 
-#             y_weights=helper.get_weights(gt,mask,hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][3])
-#             if(hyperparameters['tfidf_col_names'][4]=='softmax'):
-#                 class_weights=torch.softmax(class_weights,dim=0)
-#                 scale_weights=torch.softmax(scale_weights,dim=0)
-#                 x_weights=torch.softmax(x_weights,dim=0)
-#                 y_weights=torch.softmax(y_weights,dim=0)
-#         else:#below code NEEDS FIXING
-#             class_weights=helper.get_precomputed_idf(hyperparameters['idf_weights'],col_name=hyperparameters['tfidf_col_names'][0])
-#             print(class_weights)
-#             scale_weights=1
-#             x_weights=1
-#             y_weights=1
-#     else:
-#         class_weights=1
-#         scale_weights=1
-#         x_weights=1
-#         y_weights=1
 
     if hyperparameters['tfidf']==True:
         if isinstance(hyperparameters['idf_weights'], pd.DataFrame):
@@ -439,16 +332,16 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
     if(iou_type==(0,0,0)):#this means normal training with mse
         pred[:,0] = torch.sigmoid(pred[:,0])
         pred[:,1]= torch.sigmoid(pred[:,1])
-        gt[:,0:4]=gt[:,0:4]*inp_dim
-        gt[:,0:4]=transform_groundtruth(gt,anchors,offset,strd)
+        gt_boxes[:,0:4]=gt_boxes[:,0:4]*inp_dim
+        gt_boxes[:,0:4]=transform_groundtruth(gt_boxes,anchors,offset,strd)
         xy_loss=nn.MSELoss(reduction=hyperparameters['reduction'])
-        xy_coord_loss=xy_loss(pred[:,0:2],gt[:,0:2])
+        xy_coord_loss=xy_loss(pred[:,0:2],gt_boxes[:,0:2])
         wh_loss=nn.MSELoss(reduction=hyperparameters['reduction'])
-        wh_coord_loss=wh_loss(pred[:,2:4],gt[:,2:4])
+        wh_coord_loss=wh_loss(pred[:,2:4],gt_boxes[:,2:4])
     else:
         pred=transform(pred.unsqueeze(0),anchors.unsqueeze(0),offset.unsqueeze(0),strd.unsqueeze(0),only_coord=True).squeeze(0)
-        gt[:,0:4]=gt[:,0:4]*inp_dim
-        iou=bbox_iou(get_abs_coord(pred[:,0:4].unsqueeze(0)),get_abs_coord(gt[:,0:4].unsqueeze(0)),iou_type)
+        gt_boxes[:,0:4]=gt_boxes[:,0:4]*inp_dim
+        iou=bbox_iou(get_abs_coord(pred[:,0:4].unsqueeze(0)),get_abs_coord(gt_boxes[:,0:4].unsqueeze(0)),iou_type)
         if hyperparameters['reduction']=='sum':
             iou_loss=(1-iou).sum()
         else:
@@ -456,16 +349,24 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
        
     
     bce_class=nn.CrossEntropyLoss(reduction=hyperparameters['reduction'],weight=class_weights)
-    class_loss=bce_class(pred[:,5:],gt[:,5:].max(axis=1)[1])
+    class_loss=bce_class(pred[:,5:],gt_labels)
 
     
     bce_obj=csloss.FocalLoss(alpha=alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
-    confidence_loss=(bce_obj(pred[:,4],gt[:,4]))
+    
+    confidence_loss=(bce_obj(pred[:,4],torch.ones(pred[:,4].shape).cuda()))
     
     bce_noobj=csloss.FocalLoss(alpha=1-alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
     no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
     
-#     print(gt.shape[0])
+#     sinkhorn = csloss.SinkhornDistance(eps=0.1, max_iter=100,reduction='sum')
+#     total_dist=0
+#     for i in range(len(w_d['tt'])):
+#         dist, P, C = sinkhorn(w_d['dd'][i], w_d['tt'][i])
+#         total_dist+=dist
+        
+#     print(total_dist)
+#     print(gt_labels.shape[0])
 #     print('iou_loss is:',iou_loss)
 #     print('xy_loss is:',xy_coord_loss)
 #     print('wh_coord_loss is:',wh_coord_loss)
@@ -474,9 +375,10 @@ def yolo_loss(pred,gt,noobj_box,mask,anchors,offset,strd,inp_dim,hyperparameters
 #     print('class_loss is:',class_loss)
 
     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+confidence_loss+lno_obj*no_obj_conf_loss+class_loss
+#     total_loss=lcoord*(xy_coord_loss+wh_coord_loss+iou_loss)+class_loss+total_dist
     
     if hyperparameters['reduction']=='sum':
-        total_loss=total_loss/sum(mask)
+        total_loss=total_loss/gt_labels.shape[0]
     
     return total_loss
 
