@@ -205,4 +205,4 @@ def evaluate(model, device,coco_version,confidence=0.01,iou_threshold=0.5,subset
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
     torch.set_num_threads(n_threads)
-    return coco_evaluator.get_stats()
+    return coco_evaluator.get_stats()[0]

@@ -174,7 +174,7 @@ def build_tensors(out,iou_list,pw_ph,cx_cy,stride,hyperparameters):
     resp_pw_ph=[]
     resp_stride=[]
     no_obj=[]
-    w_d={}
+    
     iou_ignore_thresh=hyperparameters['iou_ignore_thresh']
     
     for i in range(len(iou_list)):
@@ -195,26 +195,41 @@ def build_tensors(out,iou_list,pw_ph,cx_cy,stride,hyperparameters):
     no_obj=torch.cat(no_obj,dim=0)
     
     
-    if (False):
-        true_pred=torch.sigmoid(out[:,:,4:5])
-        min_dim=int(cx_cy.max().item()+1)//4
-        tt=[]
-        dd=[]
-        for j in range(len(iou_list)):
-            distribution=(iou_list[j].max(axis=0))[0]
-            distribution[distribution<0]=0
-            for i in range(3):
-                slce=min_dim*(2**i)
 
-                ind=slce*slce*3
-                prev=0
-                tt.append(true_pred[j,prev:prev+ind,0].reshape(3,slce,slce).cuda())
-                dd.append(distribution[prev:prev+ind].reshape(3,slce,slce).cuda())
-                prev=ind
-        w_d={'dd':dd,'tt':tt}
 
     return resp_raw_pred,resp_cx_cy,resp_pw_ph,resp_stride,no_obj
 
+    
+def get_wasserstein_matrices(out,iou_list,inp_dim):
+    
+    w_d={}
+    true_pred=torch.sigmoid(out[:,:,4:5])
+    min_dim=int(inp_dim//32)
+    tt=[]
+    dd=[]
+    for j in range(len(iou_list)):
+        distribution=(iou_list[j].max(axis=0))[0]
+        distribution[distribution<0]=0
+        prev=0
+        for i in range(3):
+            slce=min_dim*(2**i)
+
+            ind=slce*slce*3
+            ba=true_pred[j,prev:prev+ind:3,0].reshape(slce,slce)
+            bb=true_pred[j,prev+1:prev+ind:3,0].reshape(slce,slce)
+            bc=true_pred[j,prev+2:prev+ind:3,0].reshape(slce,slce)
+            t=torch.stack((ba,bb,bc)).cuda()
+            tt.append(t)
+            
+            ba=distribution[prev:prev+ind:3].reshape(slce,slce)
+            bb=distribution[prev+1:prev+ind:3].reshape(slce,slce)
+            bc=distribution[prev+2:prev+ind:3].reshape(slce,slce)
+            d=torch.stack((ba,bb,bc)).cuda()
+            dd.append(d)
+            prev=ind
+    w_d={'dd':dd,'tt':tt}
+    
+    return w_d
     
 def get_abs_coord(box):
     # yolo predicts center coordinates
@@ -351,19 +366,18 @@ def yolo_loss(pred,targets,noobj_box,anchors,offset,strd,inp_dim,hyperparameters
     bce_class=nn.CrossEntropyLoss(reduction=hyperparameters['reduction'],weight=class_weights)
     class_loss=bce_class(pred[:,5:],gt_labels)
 
-    
-    bce_obj=csloss.FocalLoss(alpha=alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
-    
-    confidence_loss=(bce_obj(pred[:,4],torch.ones(pred[:,4].shape).cuda()))
-    
-    bce_noobj=csloss.FocalLoss(alpha=1-alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
-    no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
-    
-#     sinkhorn = csloss.SinkhornDistance(eps=0.1, max_iter=100,reduction='sum')
-#     total_dist=0
-#     for i in range(len(w_d['tt'])):
-#         dist, P, C = sinkhorn(w_d['dd'][i], w_d['tt'][i])
-#         total_dist+=dist
+    if hyperparameters['wasserstein']==False:
+        bce_obj=csloss.FocalLoss(alpha=alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'],pos_weight=loc_weights)
+        confidence_loss=(bce_obj(pred[:,4],torch.ones(pred[:,4].shape).cuda()))
+
+        bce_noobj=csloss.FocalLoss(alpha=1-alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
+        no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
+    else:    
+        sinkhorn = csloss.SinkhornDistance(eps=0.1, max_iter=100,reduction='sum')
+        no_obj_conf_loss=0
+        for i in range(len(noobj_box['tt'])):
+            dist, P, C = sinkhorn(noobj_box['dd'][i], noobj_box['tt'][i])
+            no_obj_conf_loss+=dist
         
 #     print(total_dist)
 #     print(gt_labels.shape[0])

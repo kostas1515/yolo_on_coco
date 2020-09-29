@@ -9,7 +9,7 @@ import time
 from darknet import *
 import util as util
 import torch.optim as optim
-import test as tester
+import test 
 import sys
 import timeit
 import torch.autograd
@@ -48,13 +48,14 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
                      'iou_ignore_thresh': iou_thresh,
                      'inf_confidence':inf_c,
                      'inf_iou_threshold':inf_t,
+                     'wasserstein':False,
                      'tfidf': True, 
                      'idf_weights': True, 
                      'tfidf_col_names': ['img_freq', 'none', 'none', 'none', 'no_softmax'],
                      'augment': 1, 
                      'workers': 4,
                      'pretrained':True,
-                     'path': 'bayes_opt', 
+                     'path': 'yolo2014', 
                      'reduction': 'sum'}
 
     mode={'bayes_opt':bayes_opt,
@@ -196,7 +197,7 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
             torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'avg_loss': outcome['total_loss'],
+            'avg_loss': outcome['avg_loss'],
             'avg_iou': outcome['avg_iou'],
             'avg_pos': outcome['avg_pos'],
             'avg_neg':outcome['avg_neg'],

@@ -9,7 +9,7 @@ import time
 from darknet import *
 import util as util
 import torch.optim as optim
-import test as tester
+import test
 import sys
 import timeit
 import torch.autograd
@@ -22,26 +22,27 @@ import yolo_function as yolo_function
 hyperparameters={'lr': 0.0001, 
                  'epochs': 90,
                  'resume_from':0,
-                 'coco_version': '2014', #can be either '2014' or '2017'
+                 'coco_version': '2017', #can be either '2014' or '2017'
                  'batch_size': 16,
-                 'weight_decay': 0.0005,
+                 'weight_decay': 0.001,
                  'momentum': 0.9, 
                  'optimizer': 'sgd', 
-                 'alpha': 0.6, 
-                 'gamma': 1.3, 
-                 'lcoord': 5,
-                 'lno_obj': 0.5,
-                 'iou_type': (1, 0, 0),
-                 'iou_ignore_thresh': 0.213, 
+                 'alpha': 0.5, 
+                 'gamma': 2, 
+                 'lcoord': 2,
+                 'lno_obj': 1,
+                 'iou_type': (0, 0, 1),
+                 'iou_ignore_thresh': 0.25, 
                  'tfidf': True, 
                  'idf_weights': True, 
                  'tfidf_col_names': ['img_freq', 'none', 'none', 'none', 'no_softmax'],
+                 'wasserstein':True,
                  'inf_confidence':0.01,
                  'inf_iou_threshold':0.5,
-                 'augment': 1, 
+                 'augment': 0, 
                  'workers': 4,
                  'pretrained':False,
-                 'path': 'yolo2014', 
+                 'path': 'yolo2017_semiprtnd', 
                  'reduction': 'sum'}
 
 mode={'bayes_opt':False,
@@ -150,13 +151,13 @@ scheduler=optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max',patience=5)
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size,
                             shuffle=True,collate_fn=helper.collate_fn, num_workers=hyperparameters['workers'])
 
+
 for i in range(hyperparameters['epochs']):
     outcome=yolo_function.train_one_epoch(model,optimizer,train_dataloader,hyperparameters,mode)
     mAP=test.evaluate(model, device,coco_version,confidence=hyperparameters['inf_confidence'],iou_threshold=hyperparameters['inf_iou_threshold'])
     scheduler.step(mAP)
     if(mode['save_summary']==True):
         writer = SummaryWriter('../results/'+hyperparameters['path'])
-        
         writer.add_scalar('Loss/train', outcome['avg_loss'], hyperparameters['resume_from'])
         writer.add_scalar('AIoU/train', outcome['avg_iou'], hyperparameters['resume_from'])
         writer.add_scalar('PConf/train', outcome['avg_conf'], hyperparameters['resume_from'])

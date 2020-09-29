@@ -161,6 +161,7 @@ class Darknet(nn.Module):
         torch.backends.cudnn.benchmark = True
         self.blocks = parse_cfg(cfgfile)
         self.net_info, self.module_list = create_modules(self.blocks)
+#         self.net_info["height"]=int(np.random.randint(10,20,1))*32
         self.inp_dim = int (self.net_info["height"])
         
         modules = self.blocks[1:]

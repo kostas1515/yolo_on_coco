@@ -10,7 +10,7 @@ import torch.autograd
 import helper as helper
 from torch import autograd
 from torch.utils.tensorboard import SummaryWriter
-import test as tester
+import test
 
 
 def train_one_epoch(model,optimizer,dataloader,hyperparameters,mode):
@@ -78,6 +78,8 @@ def train_one_epoch(model,optimizer,dataloader,hyperparameters,mode):
         
         stats=helper.get_progress_stats(true_pred,no_obj,iou_list,targets)
 
+        if hyperparameters['wasserstein']==True:
+            no_obj=util.get_wasserstein_matrices(raw_pred,iou_list,inp_dim)
         
         if mode['debugging']==True:
             with autograd.detect_anomaly():
@@ -88,9 +90,7 @@ def train_one_epoch(model,optimizer,dataloader,hyperparameters,mode):
             except RuntimeError:
 #                 print('bayes opt failed')
                 break_flag=1
-                break
-
-                
+                break     
         else:
             loss=util.yolo_loss(resp_raw_pred,targets,no_obj,resp_pw_ph,resp_cx_cy,resp_stride,inp_dim,hyperparameters)
         loss.backward()
