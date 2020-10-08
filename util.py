@@ -340,7 +340,7 @@ def yolo_loss(pred,targets,noobj_box,anchors,offset,strd,inp_dim,hyperparameters
         class_weights=None
         
     if(hyperparameters['tfidf_col_names'][1]=='area'):
-        loc_weights=helper.get_location_weights(offset,mask)
+        loc_weights=helper.get_location_weights(gt_boxes)
     else:
         loc_weights=None
         
@@ -372,14 +372,14 @@ def yolo_loss(pred,targets,noobj_box,anchors,offset,strd,inp_dim,hyperparameters
 
         bce_noobj=csloss.FocalLoss(alpha=1-alpha,gamma=gamma,logits=True,reduction=hyperparameters['reduction'])
         no_obj_conf_loss=bce_noobj(noobj_box,torch.zeros(noobj_box.shape).cuda())
-    else:    
+    else:
         sinkhorn = csloss.SinkhornDistance(eps=0.1, max_iter=100,reduction='sum')
         no_obj_conf_loss=0
         for i in range(len(noobj_box['tt'])):
-            dist, P, C = sinkhorn(noobj_box['dd'][i], noobj_box['tt'][i])
+            dist, P, C = sinkhorn(5*noobj_box['dd'][i], 5*noobj_box['tt'][i])
             no_obj_conf_loss+=dist
         
-#     print(total_dist)
+#     print(no_obj_conf_loss)
 #     print(gt_labels.shape[0])
 #     print('iou_loss is:',iou_loss)
 #     print('xy_loss is:',xy_coord_loss)

@@ -6,29 +6,29 @@ import bayesian_pipeline as bayesian_pipeline
 import numpy as np
 
 
-pbounds = {'lr':(1e-7,0.0001),'w': (1e-7, 0.001),'m': (0.8, 0.999),'g':(0.0, 2.0),'a':(0.01, 0.99),
-           'lcoor':(1e-7,1.0),'lno':(1e-7,1.0),'iou_thresh':(0.2,0.75),'iou_type':(0.0,4.0),'inf_c':(1e-7,0.1),'inf_t':(0.25,0.75)}
+pbounds = {'w': (1e-7, 0.01),'m': (0.6, 0.999),'g':(0.0, 2.0),'a':(0.01, 0.99),
+           'lcoor':(1e-7,10.0),'lno':(1e-7,5.0),'iou_thresh':(0.1,0.95),'iou_type':(0.0,4.0)}
 
 
 
-for i in range(25):
-    optimizer = BayesianOptimization(
-        f=bayesian_pipeline.bayesian_opt,
-        pbounds=pbounds,
-        verbose=2, # verbose = 1 prints only when a maximum is observed, verbose = 0 is silent
-        random_state=i,
-    )
 
-    optimizer.maximize(
-        init_points=10,
-        n_iter=1,
-    )
+optimizer = BayesianOptimization(
+    f=bayesian_pipeline.bayesian_opt,
+    pbounds=pbounds,
+    verbose=2, # verbose = 1 prints only when a maximum is observed, verbose = 0 is silent
+    random_state=64,
+)
 
-    print(optimizer.max)
+optimizer.maximize(
+    init_points=20,
+    n_iter=10,
+)
 
-    params=optimizer.max['params']
+print(optimizer.max)
 
-    bayesian_pipeline.bayesian_opt(params['lr'],params['w'],params['m'],params['g'],params['a'],
-                                   params['lcoor'],params['lno'],params['iou_thresh'],params['iou_type'],
-                                   params['inf_c'],params['inf_t'],bayes_opt=False)
+#     params=optimizer.max['params']
+
+#     bayesian_pipeline.bayesian_opt(params['lr'],params['w'],params['m'],params['g'],params['a'],
+#                                    params['lcoor'],params['lno'],params['iou_thresh'],params['iou_type'],
+#                                    params['inf_c'],params['inf_t'],bayes_opt=False)
 

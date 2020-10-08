@@ -1,26 +1,17 @@
 from dataset import *
-import timeit 
-import cv2
-import numpy as np
-from zipfile import ZipFile
-import pandas as pd
 import torch
-import time
-from darknet import *
-import util as util
 import torch.optim as optim
 import test 
 import sys
-import timeit
-import torch.autograd
 import helper as helper
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
-import pandas as pd
 import test
+import init_model
 import yolo_function as yolo_function
 
 
-def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=True):
+def bayesian_opt(w,m,g,a,lcoor,lno,iou_thresh,iou_type,bayes_opt=True):
     
     iou_type=int(round(iou_type))
     if(iou_type)==0:
@@ -32,10 +23,10 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
     else:
         iou_type=(0,0,1) 
     
-    hyperparameters={'lr': lr, 
+    hyperparameters={'lr': 0.0001, 
                      'epochs': 1,
                      'resume_from':0,
-                     'coco_version': '2014', #can be either '2014' or '2017'
+                     'coco_version': '2017', #can be either '2014' or '2017'
                      'batch_size': 16,
                      'weight_decay': w,
                      'momentum': m, 
@@ -46,114 +37,48 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
                      'lno_obj': lno,
                      'iou_type': iou_type,
                      'iou_ignore_thresh': iou_thresh,
-                     'inf_confidence':inf_c,
-                     'inf_iou_threshold':inf_t,
+                     'inf_confidence':0.01,
+                     'inf_iou_threshold':0.5,
                      'wasserstein':False,
                      'tfidf': True, 
                      'idf_weights': True, 
                      'tfidf_col_names': ['img_freq', 'none', 'none', 'none', 'no_softmax'],
                      'augment': 1, 
                      'workers': 4,
-                     'pretrained':True,
-                     'path': 'yolo2014', 
+                     'pretrained':False,
+                     'path': 'yolo2017_semiprtnd', 
                      'reduction': 'sum'}
 
     mode={'bayes_opt':bayes_opt,
+          'multi_scale':False,
           'debugging':False,
           'show_output':False,
-          'multi_gpu':False,
+          'multi_gpu':True,
           'show_temp_summary':False,
           'save_summary': bayes_opt==False
          }
 
 #     print(hyperparameters)
-    if isinstance(hyperparameters['idf_weights'],pd.DataFrame)==False:
-        if (hyperparameters['idf_weights']==True):
-            hyperparameters['idf_weights']=pd.read_csv('../idf.csv')
-        else:
-            hyperparameters['idf_weights']=False
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 #     print('Using: ',device)
 
-    net = Darknet("../cfg/yolov3.cfg")
+    model,optimizer,hyperparameters=init_model.init_model(hyperparameters,mode,show=False)
+
+    if type(model) is nn.DataParallel:
+        inp_dim=model.module.inp_dim
+    else:
+        inp_dim=model.inp_dim
     coco_version=hyperparameters['coco_version']
-    inp_dim=net.inp_dim
 
-    '''
-    when loading weights from dataparallel model then, you first need to instatiate the dataparallel model 
-    if you start fresh then first model.load_weights and then make it parallel
-    '''
-    try:
-        PATH = '../pth/'+hyperparameters['path']+'/'
-        checkpoint = torch.load(PATH+hyperparameters['path']+'.tar')
-                    # Assuming that we https://pytorch.org/docs/stable/data.html#torch.utils.data.Datasetare on a CUDA machine, this should print a CUDA device:
-        net.to(device)
-
-        if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
-            model = nn.DataParallel(net)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            model.to(device)
-        else:
-            model=net
-            model.load_state_dict(checkpoint['model_state_dict'])
-            model.to(device)
-
-        if hyperparameters['optimizer']=='sgd':
-            optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
-        elif hyperparameters['optimizer']=='adam':
-            optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-
-#         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        hyperparameters['resume_from']=checkpoint['epoch']
-
-    except FileNotFoundError:
-        if (hyperparameters['pretrained']==True):
-            print("WARNING FILE NOT FOUND INSTEAD USING OFFICIAL PRETRAINED")
-            net.load_weights("../yolov3.weights")
-
-            net.to(device)
-            if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
-                model = nn.DataParallel(net)
-                model.to(device)
-            else:
-                model=net
-
-            if hyperparameters['optimizer']=='sgd':
-                optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
-            elif hyperparameters['optimizer']=='adam':
-                optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-            hyperparameters['resume_from']=0
-        else:
-            try:
-                PATH = '../pth/'+hyperparameters['path']+'/'
-                os.mkdir(PATH)
-            except FileExistsError:
-                pass
-#                     print('path already exist')
-
-            if (torch.cuda.device_count() > 1)&(mode['multi_gpu']==True):
-                model = nn.DataParallel(net)
-                model.to(device)
-            else:
-                model=net
-                model.to(device)
-
-            if hyperparameters['optimizer']=='sgd':
-                optimizer = optim.SGD(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'], momentum=hyperparameters['momentum'])
-            elif hyperparameters['optimizer']=='adam':
-                optimizer = optim.Adam(model.parameters(), lr=hyperparameters['lr'], weight_decay=hyperparameters['weight_decay'])
-            hyperparameters['resume_from']=0
-                
             
             
-
     if bayes_opt==True:
-        tr_subset=0.01
-        ts_subset=0.1
+        tr_subset=0.1
+        ts_subset=1
     else:
         tr_subset=1
         ts_subset=1
+    
     if(mode['save_summary']==True):
         writer = SummaryWriter('../results/'+hyperparameters['path'])
    
@@ -178,10 +103,6 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
             return 0
         else:
             mAP=test.evaluate(model, device,coco_version,confidence=hyperparameters['inf_confidence'],iou_threshold=hyperparameters['inf_iou_threshold'],subset=ts_subset)
-            if(len(mAP)==0):
-                mAP=0
-            else:
-                mAP=mAP[0]
         if(mode['save_summary']==True):
             
             writer.add_scalar('Loss/train', outcome['avg_loss'], hyperparameters['resume_from'])
@@ -192,6 +113,7 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
             writer.add_scalar('NClass/train', outcome['avg_neg'], hyperparameters['resume_from'])
             writer.add_scalar('mAP/valid', mAP, hyperparameters['resume_from'])
             
+            hyperparameters['resume_from']=hyperparameters['resume_from']+1
         if(mode['bayes_opt']==False):
             
             torch.save({
@@ -203,7 +125,7 @@ def bayesian_opt(lr,w,m,g,a,lcoor,lno,iou_thresh,iou_type,inf_c,inf_t,bayes_opt=
             'avg_neg':outcome['avg_neg'],
             'avg_conf': outcome['avg_conf'],
             'avg_no_conf': outcome['avg_no_conf'],
-            'epoch':hyperparameters['resume_from']+1
+            'epoch':hyperparameters['resume_from']
             }, PATH+hyperparameters['path']+'.tar')
 
 #             hyperparameters['resume_from']=checkpoint['epoch']+1

@@ -7,6 +7,7 @@ from BoundingBoxes import BoundingBoxes
 from utils import *
 import numba
 from numba import jit
+from darknet import *
 
 
 
@@ -58,17 +59,9 @@ def get_precomputed_idf(obj_idf,col_name):
     
     return idf
 
-def get_location_weights(offset,mask):
-    final=[]
-    for sl in offset.tolist():
-        final.append(''.join(str(sl)))
-    weights=[]
-    values, counts = np.unique(final, return_counts=True)
-    counts=np.log(len(mask)/counts)
-    for el in final:
-        for k,v in enumerate(values):
-            if v==el:
-                weights.append(counts[k])
+def get_location_weights(gt_boxes):
+    area=gt_boxes[:,2]*gt_boxes[:,3]
+    weights=-torch.log(area)
     return torch.tensor(weights,device='cuda')
 
 def get_weights(gt,mask,obj_idf,col_name):
@@ -331,3 +324,5 @@ def getBoundingBoxes(coco_version):
         fh1.close()
     os.chdir('../../yolo')
     return allBoundingBoxes
+
+
